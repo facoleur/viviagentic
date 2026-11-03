@@ -1,0 +1,25 @@
+[project]
+name = "vivia"
+version = "0.1.0"
+description = "Local LLM stack: Ollama + Open WebUI + FastMCP + Phoenix"
+requires-python = ">=3.12"
+dependencies = ["fastmcp>=4.1", "tzdata>=2025.1"]
+
+[project.scripts]
+vivia-mcp = "vivia.mcp:main"
+vivia-configure = "vivia.configure:main"
+
+[dependency-groups]
+ops = ["httpx>=0.28"]
+dev = ["ruff>=0.14"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]

@@ -1,0 +1,99 @@
+# Etat desire d'Open WebUI. `make configure` applique ce fichier (idempotent).
+#
+# Semantique des reglages (noms des cles, valeurs admises, defauts) :
+#   https://docs.openwebui.com/getting-started/env-configuration/
+# Pourquoi la base prime sur les variables d'environnement (PersistentConfig) :
+#   https://docs.openwebui.com/getting-started/env-configuration/#persistentconfig
+# Endpoints de l'API :
+#   https://docs.openwebui.com/getting-started/api-endpoints/
+#   Swagger de l'instance : http://localhost:3000/docs (demande ENV=dev)
+
+[openwebui]
+url = "http://localhost:3000"
+
+# Premier compte cree => admin.
+[admin]
+name = "admin"
+email = "admin@vivia.local"
+password = "changeme123"
+
+[[users]]
+name = "Tester"
+email = "tester@vivia.local"
+password = "tester123"
+role = "user"
+groups = ["testers"]
+
+[[groups]]
+name = "testers"
+description = "Comptes de test, acces lecture seule au workspace"
+
+[groups.permissions]
+workspace = { models = false, knowledge = false, prompts = false, tools = false }
+chat = { file_upload = false, delete = true, edit = true, temporary = true }
+features = { web_search = false, image_generation = false, code_interpreter = false }
+
+# ---------------------------------------------------------------------------
+# Chaque table [api."<chemin>"] est POSTee telle quelle sur /api/v1/<chemin>.
+# Ajouter ou retirer un reglage ne demande aucune modification de code.
+# Attention : ces endpoints REMPLACENT la section, ils ne la patchent pas —
+# retirer une cle la remet a son defaut.
+# ---------------------------------------------------------------------------
+
+# Permissions par defaut de tout nouvel utilisateur.
+[api."users/default/permissions"]
+workspace = { models = false, knowledge = false, prompts = false, tools = false }
+chat = { controls = true, file_upload = false, delete = true, edit = true, temporary = true }
+features = { web_search = false, image_generation = false, code_interpreter = false, direct_tool_servers = false }
+
+[api."configs/models"]
+DEFAULT_MODELS = "qwen3:8b"
+
+[api."configs/tool_servers"]
+TOOL_SERVER_CONNECTIONS = [
+  { url = "http://mcp:8000/mcp", type = "mcp", auth_type = "none", key = "", path = "", info = { id = "vivia", name = "vivia", description = "Tools de test (now, calc, roll_dice, text_stats)" }, config = { enable = true } },
+]
+
+# Aucune generation auxiliaire : le modele ne recoit que la question posee.
+# Pas de titre de conversation, pas de tags, pas de questions de suivi,
+# pas d'autocompletion, pas de reformulation de requete RAG/recherche.
+# Les templates restent vides : sans les ENABLE_*, ils ne sont jamais utilises.
+[api."tasks/config/update"]
+TASK_MODEL = ""
+TASK_MODEL_EXTERNAL = ""
+ENABLE_TITLE_GENERATION = false
+TITLE_GENERATION_PROMPT_TEMPLATE = ""
+ENABLE_TAGS_GENERATION = false
+TAGS_GENERATION_PROMPT_TEMPLATE = ""
+ENABLE_FOLLOW_UP_GENERATION = false
+FOLLOW_UP_GENERATION_PROMPT_TEMPLATE = ""
+ENABLE_AUTOCOMPLETE_GENERATION = false
+AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH = -1
+ENABLE_SEARCH_QUERY_GENERATION = false
+ENABLE_RETRIEVAL_QUERY_GENERATION = false
+QUERY_GENERATION_PROMPT_TEMPLATE = ""
+ENABLE_IMAGE_PROMPT_GENERATION = false
+IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE = ""
+TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE = ""
+
+# Entrees de modele : attache les tools au modele pour qu'ils soient toujours
+# disponibles, sans que l'utilisateur ait a les cocher dans le chat.
+# L'id d'un tool server est "server:<type>:<info.id>", d'ou "server:mcp:vivia".
+# function_calling = "native" fait passer les tools dans l'API tools d'Ollama ;
+# "default" laisse Open WebUI les decrire dans le prompt (plus fragile).
+[[models]]
+id = "qwen3:8b"
+name = "qwen3:8b"
+is_active = true
+meta = { description = "Qwen3 8B + tools MCP vivia", toolIds = ["server:mcp:vivia"] }
+params = { function_calling = "native" }
+
+[[functions]]
+id = "phoenix_tracing"
+name = "Phoenix Tracing"
+type = "filter"
+path = "openwebui/functions/phoenix_tracing.py"
+description = "Trace les chats et tool calls vers Phoenix"
+active = true
+global = true
+valves = { endpoint = "http://phoenix:6006", project_name = "open-webui" }

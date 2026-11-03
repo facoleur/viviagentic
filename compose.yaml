@@ -1,0 +1,57 @@
+name: vivia
+
+services:
+  # Seul service publié vers l'extérieur.
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    ports: ["${VIVIA_PORT:-3000}:8080"]
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+      ENABLE_OPENAI_API: "false"
+      WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:?set it in .env}
+      # Embeddings via Ollama : evite un telechargement HuggingFace a chaque boot.
+      RAG_EMBEDDING_ENGINE: ollama
+      RAG_EMBEDDING_MODEL: ${VIVIA_EMBED_MODEL:-nomic-embed-text}
+    volumes: ["open-webui:/app/backend/data"]
+    # Test repris de l'image ; start_period couvre le warm-up (migrations + embeddings).
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health | jq -ne 'input.status == true'"]
+      start_period: 120s
+      interval: 15s
+    depends_on: [ollama]
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    volumes: ["ollama:/root/.ollama"]
+    restart: unless-stopped
+
+  # Job one-shot : télécharge le modèle puis sort.
+  ollama-pull:
+    image: ollama/ollama:latest
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      MODELS: ${VIVIA_MODEL:-qwen3:8b} ${VIVIA_EMBED_MODEL:-nomic-embed-text}
+    entrypoint: ["sh", "-c", 'for m in $$MODELS; do until ollama pull "$$m"; do sleep 2; done; done']
+    depends_on: [ollama]
+    restart: "no"
+
+  mcp:
+    build: {context: ., dockerfile: docker/mcp.Dockerfile}
+    restart: unless-stopped
+
+  # UI sur la loopback uniquement, jamais exposée hors du laptop.
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    # Pas d'auth : l'ingestion OTLP exigerait une API key, et le service
+    # n'ecoute que sur la loopback. Sinon : PHOENIX_SECRET + cle dans la filter.
+    environment:
+      PHOENIX_ENABLE_AUTH: "false"
+    ports: ["127.0.0.1:6006:6006"]
+    volumes: ["phoenix:/mnt/data"]
+    restart: unless-stopped
+
+volumes:
+  open-webui:
+  ollama:
+  phoenix:
