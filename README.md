@@ -123,18 +123,28 @@ il est absent plutot qu'estime.
 ## Lineage SQL
 
 `src/lineage/` extrait le lineage d'un script SQL Oracle avec [sqlglot](https://github.com/tobymao/sqlglot)
-(parseur pur Python, dialecte Oracle, et `sqlglot.lineage` pour passer au niveau colonne plus tard).
-Pour l'instant : niveau table, sur `INSERT`, `MERGE`, `UPDATE` et `CREATE ... AS`. Les CTE sont
-ignorees, les `SELECT` seuls ne produisent rien.
+(parseur pur Python, dialecte Oracle). Sont lus `INSERT`, `MERGE`, `UPDATE` et `CREATE ... AS` ;
+les CTE et sous-requetes sont traversees, les `SELECT` seuls ne produisent rien.
 
 ```sh
-uv run vivia-lineage script.sql    # ou sur stdin ; affiche "SOURCE -> CIBLE"
+uv run vivia-lineage script.sql                    # niveau table : "SOURCE -> CIBLE"
+uv run vivia-lineage script.sql -c                 # niveau colonne : "T.COL -> T.COL"
+uv run vivia-lineage script.sql -c --html out.html # + page HTML du graphe
 ```
 
-`lineage(sql)` renvoie `[{"source": ..., "target": ...}]`, directement utilisable par le tool `graph`.
-Les templates `#NOM#` sont masques en `TPL#NOM#` avant le parsing (Oracle accepte `#` dans un
-identifiant, sauf en tete) puis restitues : `#SCH#_STG.ORDERS` reste tel quel dans le graphe.
-Un template doit donc tenir dans un identifiant ou une valeur, pas remplacer un bout de requete.
+En Python, `lineage(sql, columns=False, schema=None)` renvoie `[{"source": ..., "target": ...}]`,
+directement utilisable par le tool `graph`, et `to_html(edges, columns)` la page correspondante.
+
+- **Colonnes** : `sqlglot.lineage` remonte chaque colonne cible jusqu'aux colonnes des tables
+  sources, a travers expressions, CTE, sous-requetes et `UNION` (correspondance par position avec
+  la liste de colonnes de l'`INSERT`). Les constantes ne produisent pas d'arete. Sans schema, un
+  `SELECT *` donne une colonne `*` ; `schema` (format sqlglot `{schema: {table: {col: type}}}`,
+  templates ecrits `TPL#NOM#`) permet de le developper.
+- **Templates** : `#NOM#` est masque en `TPL#NOM#` avant le parsing (Oracle accepte `#` dans un
+  identifiant, sauf en tete) puis restitue : `#SCH#_STG.ORDERS` reste tel quel dans le graphe.
+  Un template doit donc tenir dans un identifiant ou une valeur, pas remplacer un bout de requete.
+- **HTML** : page autonome, rendue par Mermaid (charge depuis jsDelivr) en flowchart gauche-droite ;
+  en mode colonne, une boite par table contenant ses colonnes.
 
 ## Tests
 

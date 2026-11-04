@@ -1,4 +1,4 @@
-from lineage import lineage
+from lineage import lineage, to_html
 
 SQL = """
 INSERT INTO #SCH#.FACT_SALES (id, amount)
@@ -26,3 +26,51 @@ def test_lineage_tables():
         ("#SCH#.FACT_SALES", "TMP_X"),
         ("TMP_X", "DWH.DIM_CLIENT"),
     }
+
+
+COLUMNS_SQL = """
+INSERT INTO #SCH#.FACT_SALES (id, amount)
+WITH c AS (SELECT o.id, o.amount + cu.bonus AS total FROM #SCH#_STG.ORDERS o JOIN ref.cust cu
+           ON o.cid = cu.id)
+SELECT c.id, NVL(c.total, 0) FROM c UNION ALL SELECT h.id, h.amount FROM hist.sales h;
+
+MERGE INTO dwh.client d USING (SELECT id, nom FROM stg_#ENV#.client) s ON (d.id = s.id)
+WHEN MATCHED THEN UPDATE SET d.nom = s.nom
+WHEN NOT MATCHED THEN INSERT (id, nom) VALUES (s.id, s.nom);
+
+UPDATE dwh.client d SET flag = 1, ca = (SELECT SUM(f.amount) FROM #SCH#.FACT_SALES f
+                                         WHERE f.id = d.id);
+
+CREATE TABLE tmp_x AS SELECT a.id, b.amount mt FROM dwh.client a, #SCH#.FACT_SALES b;
+"""
+
+
+def test_lineage_columns():
+    assert {(e["source"], e["target"]) for e in lineage(COLUMNS_SQL, columns=True)} == {
+        ("#SCH#_STG.ORDERS.ID", "#SCH#.FACT_SALES.ID"),
+        ("HIST.SALES.ID", "#SCH#.FACT_SALES.ID"),
+        ("#SCH#_STG.ORDERS.AMOUNT", "#SCH#.FACT_SALES.AMOUNT"),
+        ("REF.CUST.BONUS", "#SCH#.FACT_SALES.AMOUNT"),
+        ("HIST.SALES.AMOUNT", "#SCH#.FACT_SALES.AMOUNT"),
+        ("STG_#ENV#.CLIENT.ID", "DWH.CLIENT.ID"),
+        ("STG_#ENV#.CLIENT.NOM", "DWH.CLIENT.NOM"),
+        ("#SCH#.FACT_SALES.AMOUNT", "DWH.CLIENT.CA"),
+        ("DWH.CLIENT.ID", "TMP_X.ID"),
+        ("#SCH#.FACT_SALES.AMOUNT", "TMP_X.MT"),
+    }
+
+
+def test_star_with_and_without_schema():
+    sql = "INSERT INTO t SELECT * FROM #S#.src"
+    schema = {"TPL#S#": {"SRC": {"A": "INT", "B": "INT"}}}
+    assert lineage(sql, columns=True) == [{"source": "#S#.SRC.*", "target": "T.*"}]
+    assert lineage(sql, columns=True, schema=schema) == [
+        {"source": "#S#.SRC.A", "target": "T.A"},
+        {"source": "#S#.SRC.B", "target": "T.B"},
+    ]
+
+
+def test_html():
+    page = to_html(lineage(COLUMNS_SQL, columns=True), columns=True)
+    assert 'subgraph t0["#35;SCH#35;_STG.ORDERS"]' in page
+    assert "-->" in page
