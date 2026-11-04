@@ -5,7 +5,6 @@ dans un identifiant, pas en premiere position) avant le parsing, puis restitues 
 """
 
 import argparse
-import html
 import re
 import sys
 from pathlib import Path
@@ -97,8 +96,9 @@ def lineage(
     return [{"source": s, "target": t} for s, t in edges]
 
 
-def to_html(edges: list[dict[str, str]], columns: bool = False, title: str = "Lineage") -> str:
-    """Page autonome (Mermaid via CDN) ; en mode colonne, une boite par table."""
+def to_mermaid(edges: list[dict[str, str]], columns: bool = False) -> str:
+    """Bloc Markdown ```mermaid (rendu tel quel par Open WebUI, GitHub, VS Code...) ;
+    en mode colonne, une boite par table."""
     ids: dict[str, str] = {}
     tables: dict[str, list[str]] = {}
     for node in (n for e in edges for n in (e["source"], e["target"])):
@@ -107,9 +107,9 @@ def to_html(edges: list[dict[str, str]], columns: bool = False, title: str = "Li
             tables.setdefault(node.rsplit(".", 1)[0] if columns else node, []).append(node)
 
     def label(text: str) -> str:
-        return '"' + html.escape(text).replace("#", "#35;") + '"'
+        return '"' + text.replace("#", "#35;").replace('"', "#quot;") + '"'
 
-    lines = ["flowchart LR"]
+    lines = ["```mermaid", "flowchart LR"]
     for i, (table, nodes) in enumerate(tables.items()):
         if columns:
             lines.append(f"  subgraph t{i}[{label(table)}]")
@@ -118,23 +118,14 @@ def to_html(edges: list[dict[str, str]], columns: bool = False, title: str = "Li
         else:
             lines.append(f"  {ids[table]}[{label(table)}]")
     lines += [f"  {ids[e['source']]} --> {ids[e['target']]}" for e in edges]
-    return f"""<!doctype html>
-<meta charset="utf-8"><title>{html.escape(title)}</title>
-<pre class="mermaid">
-{chr(10).join(lines)}
-</pre>
-<script type="module">
-import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs";
-mermaid.initialize({{startOnLoad: true, maxTextSize: 1e7, maxEdges: 1e5}});
-</script>
-"""
+    return "\n".join([*lines, "```", ""])
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Lineage d'un script SQL Oracle.")
     parser.add_argument("script", nargs="?", type=Path, help="fichier SQL (stdin par defaut)")
     parser.add_argument("-c", "--columns", action="store_true", help="lineage par colonne")
-    parser.add_argument("--html", type=Path, help="ecrit le graphe dans cette page HTML")
+    parser.add_argument("--md", type=Path, help="ecrit le graphe (Mermaid) dans ce fichier .md")
     parser.add_argument(
         "-t", "--target", help="cible des SELECT seuls (defaut : nom du fichier sans extension)"
     )
@@ -142,7 +133,7 @@ def main() -> None:
     sql = args.script.read_text() if args.script else sys.stdin.read()
     target = args.target or (args.script.stem if args.script else None)
     edges = lineage(sql, columns=args.columns, target=target)
-    if args.html:
-        args.html.write_text(to_html(edges, args.columns, args.script.name if args.script else ""))
+    if args.md:
+        args.md.write_text(to_mermaid(edges, args.columns))
     for e in edges:
         print(f"{e['source']} -> {e['target']}")

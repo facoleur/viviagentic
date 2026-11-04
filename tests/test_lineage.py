@@ -1,4 +1,4 @@
-from lineage import lineage, to_html
+from lineage import lineage, to_mermaid
 
 SQL = """
 INSERT INTO #SCH#.FACT_SALES (id, amount)
@@ -70,10 +70,11 @@ def test_star_with_and_without_schema():
     ]
 
 
-def test_html():
-    page = to_html(lineage(COLUMNS_SQL, columns=True), columns=True)
-    assert 'subgraph t0["#35;SCH#35;_STG.ORDERS"]' in page
-    assert "-->" in page
+def test_mermaid():
+    md = to_mermaid(lineage(COLUMNS_SQL, columns=True), columns=True)
+    assert md.startswith("```mermaid\nflowchart LR\n")
+    assert 'subgraph t0["#35;SCH#35;_STG.ORDERS"]' in md
+    assert "-->" in md
 
 
 def test_template_as_value():

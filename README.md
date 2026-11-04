@@ -37,7 +37,7 @@ L'image embarque le code : apres modification, `docker compose build mcp` puis `
 
 ### Tools qui rendent une vue
 
-`chart`, `graph` et `table` sont des MCP Apps : ils affichent une vue dans la conversation
+`chart`, `graph`, `sql_lineage` et `table` sont des MCP Apps : ils affichent une vue dans la conversation
 au lieu de renvoyer du texte. Le tool porte un `resourceUri` en `ui://`, le serveur sert le
 HTML correspondant en `text/html;profile=mcp-app`, et Open WebUI l'affiche dans une iframe
 sandboxee, sous le message. Les documents sont dans `src/vivia/ui.py`.
@@ -133,12 +133,12 @@ defaut le nom du fichier sans extension. Sans cible, un `SELECT` seul ne produit
 ```sh
 uv run vivia-lineage script.sql                    # niveau table : "SOURCE -> CIBLE"
 uv run vivia-lineage script.sql -c                 # niveau colonne : "T.COL -> T.COL"
-uv run vivia-lineage script.sql -c --html out.html # + page HTML du graphe
+uv run vivia-lineage script.sql -c --md out.md     # + graphe Mermaid en Markdown
 uv run vivia-lineage extract.sql -t '#SCH#.DST'    # SELECT seul ecrit dans #SCH#.DST
 ```
 
 En Python, `lineage(sql, columns=False, schema=None, target=None)` renvoie `[{"source": ..., "target": ...}]`,
-directement utilisable par le tool `graph`, et `to_html(edges, columns)` la page correspondante.
+directement utilisable par le tool `graph`, et `to_mermaid(edges, columns)` le bloc Markdown correspondant.
 
 - **Colonnes** : `sqlglot.lineage` remonte chaque colonne cible jusqu'aux colonnes des tables
   sources, a travers expressions, CTE, sous-requetes et `UNION` (correspondance par position avec
@@ -150,8 +150,11 @@ directement utilisable par le tool `graph`, et `to_html(edges, columns)` la page
   Un template seul en position de colonne (`SELECT sysdate, #pndate#, ...`) est traite comme une
   valeur : il ne cree pas d'arete. Un template doit tenir dans un identifiant ou une valeur, pas
   remplacer un bout de requete (`#WHERE_CLAUSE#`).
-- **HTML** : page autonome, rendue par Mermaid (charge depuis jsDelivr) en flowchart gauche-droite ;
-  en mode colonne, une boite par table contenant ses colonnes.
+- **Agent** : le tool MCP `sql_lineage(sql, columns, target)` affiche le graphe dans la conversation
+  Open WebUI, avec la vue de `graph` (aucune ressource externe) ; en mode colonne, une couleur par
+  table. Les aretes restent dans le resultat, lisibles par le modele.
+- **Markdown** : `--md` ecrit un bloc ` ```mermaid ` (flowchart gauche-droite, une boite par table en
+  mode colonne), rendu nativement par Open WebUI, GitHub ou VS Code, sans rien charger du web.
 
 ## Tests
 

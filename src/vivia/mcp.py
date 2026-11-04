@@ -1,6 +1,6 @@
 """Serveur MCP minimal : quelques tools jouets pour valider les tool calls.
 
-Les trois derniers sont des MCP Apps : ils rendent une vue dans la conversation
+Les quatre derniers sont des MCP Apps : ils rendent une vue dans la conversation
 au lieu de renvoyer du texte. Voir `vivia.ui` pour le contrat avec l'hote.
 """
 
@@ -16,6 +16,7 @@ from fastmcp import FastMCP
 from fastmcp.apps import AppConfig
 from pydantic import Field
 
+import lineage
 from vivia import ui
 
 mcp = FastMCP("vivia")
@@ -159,6 +160,26 @@ def graph(
         "directed": directed,
         "height": height,
     }
+
+
+@mcp.tool(app=AppConfig(resource_uri="ui://vivia/graph.html"))
+def sql_lineage(
+    sql: Annotated[str, Field(description="Script SQL Oracle ; templates `#NOM#` acceptes.")],
+    columns: Annotated[
+        bool, Field(description="Lineage par colonne plutot que par table.")
+    ] = False,
+    target: Annotated[
+        str, Field(description="Table alimentee par les SELECT seuls (ecrite par l'outil ETL).")
+    ] = "",
+) -> dict[str, Any]:
+    """Lineage d'un script SQL Oracle (INSERT, MERGE, UPDATE, CREATE AS, ou SELECT + `target`),
+    affiche en graphe dirige source -> cible. Les aretes sont aussi dans le resultat.
+    """
+    edges = lineage.lineage(sql, columns=columns, target=target or None)
+    ids = dict.fromkeys(n for e in edges for n in (e["source"], e["target"]))
+    nodes = [{"id": n, "group": n.rsplit(".", 1)[0]} for n in ids] if columns else []
+    title = "Lineage par colonne" if columns else "Lineage par table"
+    return graph(edges, nodes, title=title, subtitle=f"{len(edges)} aretes", directed=True)
 
 
 @mcp.tool(app=AppConfig(resource_uri="ui://vivia/table.html"))
