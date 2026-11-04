@@ -124,15 +124,20 @@ il est absent plutot qu'estime.
 
 `src/lineage/` extrait le lineage d'un script SQL Oracle avec [sqlglot](https://github.com/tobymao/sqlglot)
 (parseur pur Python, dialecte Oracle). Sont lus `INSERT`, `MERGE`, `UPDATE` et `CREATE ... AS` ;
-les CTE et sous-requetes sont traversees, les `SELECT` seuls ne produisent rien.
+les CTE et sous-requetes sont traversees.
+
+Un script qui ne contient qu'un `SELECT`, ecrit en table par l'outil ETL, est lu comme
+`CREATE TABLE <cible> AS SELECT ...` : la cible est `-t/--target` (`target=` en Python), par
+defaut le nom du fichier sans extension. Sans cible, un `SELECT` seul ne produit rien.
 
 ```sh
 uv run vivia-lineage script.sql                    # niveau table : "SOURCE -> CIBLE"
 uv run vivia-lineage script.sql -c                 # niveau colonne : "T.COL -> T.COL"
 uv run vivia-lineage script.sql -c --html out.html # + page HTML du graphe
+uv run vivia-lineage extract.sql -t '#SCH#.DST'    # SELECT seul ecrit dans #SCH#.DST
 ```
 
-En Python, `lineage(sql, columns=False, schema=None)` renvoie `[{"source": ..., "target": ...}]`,
+En Python, `lineage(sql, columns=False, schema=None, target=None)` renvoie `[{"source": ..., "target": ...}]`,
 directement utilisable par le tool `graph`, et `to_html(edges, columns)` la page correspondante.
 
 - **Colonnes** : `sqlglot.lineage` remonte chaque colonne cible jusqu'aux colonnes des tables

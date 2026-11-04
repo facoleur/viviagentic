@@ -85,3 +85,13 @@ def test_template_as_value():
         {"source": "SRC.A", "target": "T.X"},
         {"source": "SRC.B_#X#", "target": "T.C_#X#"},
     ]
+
+
+def test_select_only_script_with_target():
+    sql = "WITH a AS (SELECT id, mt FROM #SCH#.src) SELECT sysdate d, #pndate# j, a.id, a.mt FROM a"
+    assert lineage(sql) == []
+    assert lineage(sql, target="#SCH#.dst") == [{"source": "#SCH#.SRC", "target": "#SCH#.DST"}]
+    assert lineage(sql, columns=True, target="#SCH#.dst") == [
+        {"source": "#SCH#.SRC.ID", "target": "#SCH#.DST.ID"},
+        {"source": "#SCH#.SRC.MT", "target": "#SCH#.DST.MT"},
+    ]

@@ -51,26 +51,34 @@ def _query(stmt: exp.Expr) -> tuple[exp.Query | None, list[str] | None]:
     return query, [c.name for c in schema.expressions] if schema else None
 
 
-def lineage(sql: str, columns: bool = False, schema: dict | None = None) -> list[dict[str, str]]:
+def lineage(
+    sql: str, columns: bool = False, schema: dict | None = None, target: str | None = None
+) -> list[dict[str, str]]:
     """Aretes source -> cible, au format du tool MCP `graph`.
 
     `columns=True` donne des noeuds `TABLE.COLONNE`. `schema` (format sqlglot, noms masques)
     permet de developper les `SELECT *` ; sans lui, ils restent des colonnes `*`.
+    `target` : table alimentee par les `SELECT` seuls, quand c'est l'outil ETL qui les ecrit
+    (lus comme `CREATE TABLE <target> AS SELECT ...`) ; sans lui, ils sont ignores.
     """
     edges = {}
     for stmt in sqlglot.parse(_TPL.sub(r"TPL#\1#", sql), read="oracle"):
+        if target and isinstance(stmt, exp.Query):
+            table = exp.to_table(_TPL.sub(r"TPL#\1#", target), dialect="oracle")
+            stmt = exp.Create(this=table, kind="TABLE", expression=stmt)
         if not isinstance(stmt, _WRITES):
             continue
-        target = _name(stmt.this.find(exp.Table))
+        out = _name(stmt.this.find(exp.Table))
         if not columns:
-            skip = {target} | {c.alias_or_name.upper() for c in stmt.find_all(exp.CTE)}
-            edges |= {
-                (s, target): None for s in map(_name, stmt.find_all(exp.Table)) if s not in skip
-            }
+            skip = {out} | {c.alias_or_name.upper() for c in stmt.find_all(exp.CTE)}
+            edges |= {(s, out): None for s in map(_name, stmt.find_all(exp.Table)) if s not in skip}
             continue
         query, cols = _query(stmt.copy())
         if query is None:
             continue
+        for c in list(query.find_all(exp.Column)):  # `SELECT #pndate#` : une valeur
+            if not c.table and _MASK.fullmatch(c.name):
+                c.replace(exp.Literal.string(_unmask(c.name)))
         opts = {"validate_qualify_columns": False, "identify": False}
         query = qualify(query, schema=schema or {}, dialect="oracle", **opts)
         cols = cols or query.named_selects
@@ -81,14 +89,11 @@ def lineage(sql: str, columns: bool = False, schema: dict | None = None) -> list
                 sel.replace(exp.alias_(sel.unalias(), keys[-1]))
         nodes = _column_lineage(None, query, schema or {}, dialect="oracle")
         for key, col in zip(keys, cols, strict=False):
-            dst = f"{target}.{_unmask(col)}"
+            dst = f"{out}.{_unmask(col)}"
             for leaf in nodes[key].walk():
-                name = leaf.name.rsplit(".", 1)[-1].strip('"')
-                # un template seul en position de colonne est une valeur (`SELECT #pndate#`)
-                if leaf.downstream or not isinstance(leaf.expression, exp.Table):
-                    continue
-                if not _MASK.fullmatch(name):
-                    edges[f"{_name(leaf.expression)}.{_unmask(name)}", dst] = None
+                if not leaf.downstream and isinstance(leaf.expression, exp.Table):
+                    name = _unmask(leaf.name.rsplit(".", 1)[-1].strip('"'))
+                    edges[f"{_name(leaf.expression)}.{name}", dst] = None
     return [{"source": s, "target": t} for s, t in edges]
 
 
@@ -130,9 +135,13 @@ def main() -> None:
     parser.add_argument("script", nargs="?", type=Path, help="fichier SQL (stdin par defaut)")
     parser.add_argument("-c", "--columns", action="store_true", help="lineage par colonne")
     parser.add_argument("--html", type=Path, help="ecrit le graphe dans cette page HTML")
+    parser.add_argument(
+        "-t", "--target", help="cible des SELECT seuls (defaut : nom du fichier sans extension)"
+    )
     args = parser.parse_args()
     sql = args.script.read_text() if args.script else sys.stdin.read()
-    edges = lineage(sql, columns=args.columns)
+    target = args.target or (args.script.stem if args.script else None)
+    edges = lineage(sql, columns=args.columns, target=target)
     if args.html:
         args.html.write_text(to_html(edges, args.columns, args.script.name if args.script else ""))
     for e in edges:
