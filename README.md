@@ -120,6 +120,22 @@ Les evenements de role, d'usage ou d'ouverture d'item n'en sont pas un. OpenInfe
 pas de convention de TTFT, l'attribut reste dans le namespace `openwebui`. Sans streaming,
 il est absent plutot qu'estime.
 
+## Lineage SQL
+
+`src/lineage/` extrait le lineage d'un script SQL Oracle avec [sqlglot](https://github.com/tobymao/sqlglot)
+(parseur pur Python, dialecte Oracle, et `sqlglot.lineage` pour passer au niveau colonne plus tard).
+Pour l'instant : niveau table, sur `INSERT`, `MERGE`, `UPDATE` et `CREATE ... AS`. Les CTE sont
+ignorees, les `SELECT` seuls ne produisent rien.
+
+```sh
+uv run vivia-lineage script.sql    # ou sur stdin ; affiche "SOURCE -> CIBLE"
+```
+
+`lineage(sql)` renvoie `[{"source": ..., "target": ...}]`, directement utilisable par le tool `graph`.
+Les templates `#NOM#` sont masques en `TPL#NOM#` avant le parsing (Oracle accepte `#` dans un
+identifiant, sauf en tete) puis restitues : `#SCH#_STG.ORDERS` reste tel quel dans le graphe.
+Un template doit donc tenir dans un identifiant ou une valeur, pas remplacer un bout de requete.
+
 ## Tests
 
 ```sh
