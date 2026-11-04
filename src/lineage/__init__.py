@@ -20,8 +20,12 @@ _MASK = re.compile(r"TPL#(\w+)#")
 _WRITES = exp.Insert | exp.Merge | exp.Update | exp.Create
 
 
+def _unmask(name: str) -> str:
+    return _MASK.sub(r"#\1#", name).upper()
+
+
 def _name(table: exp.Table) -> str:
-    return _MASK.sub(r"#\1#", ".".join(p.name for p in table.parts)).upper()
+    return _unmask(".".join(p.name for p in table.parts))
 
 
 def _query(stmt: exp.Expr) -> tuple[exp.Query | None, list[str] | None]:
@@ -77,10 +81,14 @@ def lineage(sql: str, columns: bool = False, schema: dict | None = None) -> list
                 sel.replace(exp.alias_(sel.unalias(), keys[-1]))
         nodes = _column_lineage(None, query, schema or {}, dialect="oracle")
         for key, col in zip(keys, cols, strict=False):
+            dst = f"{target}.{_unmask(col)}"
             for leaf in nodes[key].walk():
-                if not leaf.downstream and isinstance(leaf.expression, exp.Table):
-                    src = f"{_name(leaf.expression)}.{leaf.name.rsplit('.', 1)[-1].upper()}"
-                    edges[src, f"{target}.{col.upper()}"] = None
+                name = leaf.name.rsplit(".", 1)[-1].strip('"')
+                # un template seul en position de colonne est une valeur (`SELECT #pndate#`)
+                if leaf.downstream or not isinstance(leaf.expression, exp.Table):
+                    continue
+                if not _MASK.fullmatch(name):
+                    edges[f"{_name(leaf.expression)}.{_unmask(name)}", dst] = None
     return [{"source": s, "target": t} for s, t in edges]
 
 

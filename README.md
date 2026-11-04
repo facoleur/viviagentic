@@ -142,7 +142,9 @@ directement utilisable par le tool `graph`, et `to_html(edges, columns)` la page
   templates ecrits `TPL#NOM#`) permet de le developper.
 - **Templates** : `#NOM#` est masque en `TPL#NOM#` avant le parsing (Oracle accepte `#` dans un
   identifiant, sauf en tete) puis restitue : `#SCH#_STG.ORDERS` reste tel quel dans le graphe.
-  Un template doit donc tenir dans un identifiant ou une valeur, pas remplacer un bout de requete.
+  Un template seul en position de colonne (`SELECT sysdate, #pndate#, ...`) est traite comme une
+  valeur : il ne cree pas d'arete. Un template doit tenir dans un identifiant ou une valeur, pas
+  remplacer un bout de requete (`#WHERE_CLAUSE#`).
 - **HTML** : page autonome, rendue par Mermaid (charge depuis jsDelivr) en flowchart gauche-droite ;
   en mode colonne, une boite par table contenant ses colonnes.
 

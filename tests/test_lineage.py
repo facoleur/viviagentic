@@ -74,3 +74,14 @@ def test_html():
     page = to_html(lineage(COLUMNS_SQL, columns=True), columns=True)
     assert 'subgraph t0["#35;SCH#35;_STG.ORDERS"]' in page
     assert "-->" in page
+
+
+def test_template_as_value():
+    sql = (
+        "INSERT INTO t (d, j, x, c_#X#) SELECT sysdate, #pndate#, a, b_#X# FROM src"
+        " WHERE dt = #pndate#"
+    )
+    assert lineage(sql, columns=True) == [
+        {"source": "SRC.A", "target": "T.X"},
+        {"source": "SRC.B_#X#", "target": "T.C_#X#"},
+    ]
