@@ -212,6 +212,465 @@ class TracingTests(unittest.IsolatedAsyncioTestCase):
         ):
             self.assertIs(await self.emit(payload), payload)
 
+    async def stream_at(self, event, metadata, at, body=None, filter_=None):
+        before = copy.deepcopy(event)
+        with patch.object(tracing.time, "time_ns", return_value=int(at * 1e9)):
+            returned = await (filter_ or self.filter).stream(event, metadata, body)
+        self.assertIs(returned, event)
+        self.assertEqual(event, before)
+
+    async def test_llm_tool_llm_sequence_with_reasoning_and_separate_contexts(self):
+        metadata = {"chat_id": "chat1", "message_id": "a1"}
+        request = {
+            "model": "qwen3:8b",
+            "stream": True,
+            "temperature": 0.2,
+            "messages": [{"role": "user", "content": "Lance quatre dés."}],
+            "tools": [{"type": "function", "function": {"name": "vivia_roll_dice"}}],
+            "metadata": {"private": "must not be captured"},
+        }
+        await self.stream_at(
+            {"choices": [{"index": 0, "delta": {"reasoning_content": "Je vais lancer "}}]},
+            metadata,
+            102,
+            body=request,
+        )
+        await self.stream_at(
+            {
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {
+                            "reasoning_content": "les dés.",
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": "call-dice",
+                                    "function": {
+                                        "name": "vivia_roll_dice",
+                                        "arguments": '{"count":',
+                                    },
+                                }
+                            ],
+                        },
+                    }
+                ]
+            },
+            metadata,
+            104,
+            body=request,
+        )
+        await self.stream_at(
+            {
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {
+                            "tool_calls": [
+                                {"index": 0, "function": {"arguments": '4,"sides":20}'}}
+                            ],
+                        },
+                        "finish_reason": "tool_calls",
+                    }
+                ]
+            },
+            metadata,
+            107,
+            body=request,
+        )
+        # Usage often follows the terminal choice; it must not extend the LLM duration.
+        await self.stream_at(
+            {
+                "choices": [],
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 6,
+                    "total_tokens": 16,
+                    "completion_tokens_details": {"reasoning_tokens": 4},
+                },
+            },
+            metadata,
+            108,
+            body=request,
+        )
+        # The tool loop's next iteration sends a brand new body dict (its own
+        # messages list, grown with the assistant turn and the tool result) —
+        # that fresh object, not an explicit signal, is what marks a new call.
+        second_request = copy.deepcopy(request)
+        second_request["messages"].extend(
+            [
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": "call-dice",
+                            "function": {
+                                "name": "vivia_roll_dice",
+                                "arguments": '{"count":4,"sides":20}',
+                            },
+                        }
+                    ],
+                },
+                {"role": "tool", "tool_call_id": "call-dice", "content": '{"total":29}'},
+            ]
+        )
+        await self.stream_at(
+            {
+                "model": "qwen3:8b-actual",
+                "choices": [{"index": 0, "delta": {"reasoning_content": "Le total est 29."}}],
+            },
+            metadata,
+            111,
+            body=second_request,
+        )
+        await self.stream_at(
+            {"choices": [{"index": 0, "delta": {"content": "Total : "}}]},
+            metadata,
+            114,
+            body=second_request,
+        )
+        await self.stream_at(
+            {
+                "choices": [{"index": 0, "delta": {"content": "29."}, "finish_reason": "stop"}],
+                "usage": {"input_tokens": 20, "output_tokens": 8, "total_tokens": 28},
+            },
+            metadata,
+            116,
+            body=second_request,
+        )
+        await self.emit(body(output=tool()), metadata, filter_=self.new_filter())
+        first, second = self.spans("llm.call.1")[0], self.spans("llm.call.2")[0]
+        turn = self.spans("open-webui.chat")[0]
+        tool_span = self.spans("tool.vivia_roll_dice")[0]
+        self.assertEqual(len(self.spans()), 5)
+        self.assertEqual({s.context.trace_id for s in self.spans()}, {turn.context.trace_id})
+        self.assertTrue(
+            all(s.parent.span_id == turn.context.span_id for s in [first, tool_span, second])
+        )
+        self.assertEqual((first.start_time, first.end_time), (102_000_000_000, 107_000_000_000))
+        self.assertLess(first.end_time, tool_span.start_time)
+        self.assertLess(tool_span.end_time, second.start_time)
+        self.assertEqual((second.start_time, second.end_time), (111_000_000_000, 116_000_000_000))
+        self.assertEqual(
+            first.attributes["llm.input_messages.0.message.content"], "Lance quatre dés."
+        )
+        self.assertNotIn("llm.input_messages.1.message.role", first.attributes)
+        self.assertNotIn("private", first.attributes["input.value"])
+        self.assertEqual(second.attributes["llm.input_messages.2.message.role"], "tool")
+        self.assertEqual(
+            second.attributes["llm.input_messages.2.message.tool_call_id"], "call-dice"
+        )
+        self.assertEqual(
+            first.attributes["llm.output_messages.0.message.contents.0.message_content.type"],
+            "reasoning",
+        )
+        self.assertEqual(
+            first.attributes["llm.output_messages.0.message.contents.0.message_content.text"],
+            "Je vais lancer les dés.",
+        )
+        self.assertEqual(
+            first.attributes[
+                "llm.output_messages.0.message.tool_calls.0.tool_call.function.arguments"
+            ],
+            '{"count":4,"sides":20}',
+        )
+        self.assertEqual(second.attributes["llm.output_messages.0.message.content"], "Total : 29.")
+        self.assertEqual(first.attributes["llm.token_count.total"], 16)
+        self.assertEqual(second.attributes["llm.token_count.total"], 28)
+        self.assertEqual(first.attributes["llm.token_count.completion_details.reasoning"], 4)
+        self.assertNotIn("llm.token_count.total", turn.attributes)
+        self.assertEqual(second.attributes["llm.model_name"], "qwen3:8b-actual")
+        self.assertEqual(turn.attributes["openwebui.llm.call_count"], 2)
+
+    async def test_responses_snapshots_replace_deltas_without_duplicate_reasoning(self):
+        metadata = {}
+        request = {"model": "responses-model", "stream": True, "messages": []}
+        await self.stream_at(
+            {
+                "type": "response.output_item.added",
+                "output_index": 0,
+                "item": {"type": "reasoning", "summary": []},
+            },
+            metadata,
+            102,
+            body=request,
+        )
+        await self.stream_at(
+            {
+                "type": "response.reasoning_summary_text.delta",
+                "output_index": 0,
+                "summary_index": 0,
+                "delta": "Réflexion.",
+            },
+            metadata,
+            103,
+            body=request,
+        )
+        await self.stream_at(
+            {
+                "type": "response.output_item.done",
+                "output_index": 0,
+                "item": {
+                    "type": "reasoning",
+                    "summary": [{"type": "summary_text", "text": "Réflexion."}],
+                },
+            },
+            metadata,
+            104,
+            body=request,
+        )
+        await self.stream_at(
+            {
+                "type": "response.completed",
+                "response": {
+                    "model": "responses-model",
+                    "output": [
+                        {
+                            "type": "reasoning",
+                            "summary": [{"type": "summary_text", "text": "Réflexion."}],
+                        },
+                        {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [{"type": "output_text", "text": "42."}],
+                        },
+                    ],
+                    "usage": {"input_tokens": 4, "output_tokens": 2, "total_tokens": 6},
+                },
+            },
+            metadata,
+            105,
+            body=request,
+        )
+        await self.emit(body(), metadata)
+        span = self.spans("llm.call.1")[0]
+        self.assertEqual(
+            span.attributes["llm.output_messages.0.message.contents.0.message_content.text"],
+            "Réflexion.",
+        )
+        self.assertEqual(span.attributes["llm.output_messages.1.message.content"], "42.")
+        self.assertEqual(span.end_time, 105_000_000_000)
+        self.assertEqual(span.status.status_code, trace.StatusCode.OK)
+
+    async def test_non_streaming_response_uses_outlet_and_labels_timing_source(self):
+        # 0.10 has no stream hook for a non-streamed reply: no call is ever
+        # observed, and the outlet message is the only source. inlet() marks
+        # this as a live turn, which is what lets outlet synthesize one call.
+        metadata = {}
+        await self.filter.inlet({}, metadata)
+        payload = body()
+        payload["messages"][-1]["output"] = [
+            {"type": "reasoning", "content": [{"type": "output_text", "text": "Réflexion."}]},
+            {"type": "message", "content": [{"type": "output_text", "text": "Réponse."}]},
+        ]
+        payload["messages"][-1]["usage"] = {
+            "input_tokens": 2,
+            "output_tokens": 3,
+            "total_tokens": 5,
+        }
+        await self.emit(payload, metadata)
+        span = self.spans("llm.call.1")[0]
+        self.assertEqual(span.attributes["openwebui.llm.output_source"], "outlet")
+        self.assertEqual(
+            span.attributes["llm.output_messages.0.message.contents.0.message_content.type"],
+            "reasoning",
+        )
+        self.assertEqual(span.attributes["llm.token_count.total"], 5)
+
+    async def test_partial_stream_is_not_completed_with_final_outlet_text(self):
+        metadata = {}
+        request = {"stream": True, "messages": []}
+        await self.stream_at(
+            {"choices": [{"delta": {"content": "Partiel"}}]}, metadata, 105, body=request
+        )
+        await self.emit(body(), metadata)
+        span = self.spans("llm.call.1")[0]
+        self.assertEqual(span.status.status_code, trace.StatusCode.UNSET)
+        self.assertFalse(span.attributes["openwebui.llm.completed"])
+        self.assertEqual(span.end_time, 105_000_000_000)
+        self.assertEqual(span.attributes["llm.output_messages.0.message.content"], "Partiel")
+
+    async def test_provider_error_marks_llm_and_turn_as_failed(self):
+        metadata = {}
+        request = {"stream": True, "messages": []}
+        await self.stream_at(
+            {"error": {"message": "Provider unavailable"}}, metadata, 104, body=request
+        )
+        await self.emit(body(), metadata)
+        self.assertEqual(self.spans("llm.call.1")[0].status.status_code, trace.StatusCode.ERROR)
+        self.assertEqual(
+            self.spans("open-webui.chat")[0].status.status_code, trace.StatusCode.ERROR
+        )
+
+    async def test_interleaved_streams_are_isolated_and_outlet_retries_keep_ids(self):
+        first, second = {}, {}
+        await self.stream_at(
+            {"choices": [{"delta": {"content": "B"}, "finish_reason": "stop"}]}, second, 104
+        )
+        await self.stream_at(
+            {"choices": [{"delta": {"content": "A"}, "finish_reason": "stop"}]}, first, 105
+        )
+        await self.emit(body("a1", "chat1"), first)
+        await self.emit(body("a2", "chat2"), second)
+        spans = self.spans("llm.call.1")
+        self.assertEqual(
+            [s.attributes["llm.output_messages.0.message.content"] for s in spans], ["A", "B"]
+        )
+        self.assertNotEqual(spans[0].context.trace_id, spans[1].context.trace_id)
+        await self.emit(body("a1", "chat1"), first, filter_=self.new_filter())
+        self.assertEqual(self.spans("llm.call.1")[-1].context.span_id, spans[0].context.span_id)
+
+    async def test_multimodal_input_and_missing_metadata_are_safe(self):
+        request = {
+            "stream": True,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Regarde."},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": "https://example.invalid/image.png"},
+                        },
+                    ],
+                }
+            ],
+        }
+        before = copy.deepcopy(request)
+        metadata = {}
+        await self.stream_at(
+            {"choices": [{"delta": {"content": "Image"}, "finish_reason": "stop"}]},
+            None,
+            103,
+            body=request,
+        )
+        await self.stream_at(
+            {"choices": [{"delta": {"content": "Image"}, "finish_reason": "stop"}]},
+            metadata,
+            104,
+            body=request,
+        )
+        await self.emit(body(), metadata)
+        self.assertEqual(request, before)
+        span = self.spans("llm.call.1")[0]
+        self.assertEqual(
+            span.attributes[
+                "llm.input_messages.0.message.contents.1.message_content.image.image.url"
+            ],
+            "https://example.invalid/image.png",
+        )
+
+    async def test_time_to_first_token_ignores_non_token_events(self):
+        # Started is now pinned to the first observed `stream` event (101),
+        # not a pre-call hook (0.10 has none) — hence the shifted baseline.
+        metadata = {"chat_id": "chat1", "message_id": "a1"}
+        request = {"model": "qwen3:8b", "stream": True, "messages": []}
+        # Ni un chunk de role, ni un chunk d'usage ne constituent un premier token.
+        await self.stream_at(
+            {"choices": [{"delta": {"role": "assistant"}}]}, metadata, 101, body=request
+        )
+        await self.stream_at({"usage": {"prompt_tokens": 7}}, metadata, 102, body=request)
+        await self.stream_at(
+            {"choices": [{"delta": {"content": "Total"}}]}, metadata, 103, body=request
+        )
+        await self.stream_at(
+            {"choices": [{"delta": {"content": " : 29."}, "finish_reason": "stop"}]},
+            metadata,
+            104,
+            body=request,
+        )
+        await self.emit(body(), metadata)
+        span = self.spans("llm.call.1")[0]
+        self.assertEqual(span.attributes["openwebui.llm.time_to_first_token_ms"], 2000)
+
+    async def test_time_to_first_token_counts_reasoning_and_tool_arguments(self):
+        for fragment, at in (({"reasoning_content": "Hmm"}, 101.5), ({"content": "x"}, 103)):
+            with self.subTest(fragment=fragment):
+                self.exporter.clear()
+                self.filter = self.new_filter()
+                metadata = {"chat_id": f"chat-{at}", "message_id": "a1"}
+                request = {"model": "qwen3:8b", "stream": True, "messages": []}
+                # A non-token event first, so "started" and the first real
+                # token stay distinguishable (otherwise the very first stream
+                # event would be the token itself, giving a zero TTFT).
+                await self.stream_at(
+                    {"choices": [{"delta": {"role": "assistant"}}]}, metadata, 100, body=request
+                )
+                await self.stream_at(
+                    {"choices": [{"delta": fragment}]}, metadata, at, body=request
+                )
+                await self.stream_at(
+                    {"choices": [{"delta": {"content": "!"}, "finish_reason": "stop"}]},
+                    metadata,
+                    104,
+                    body=request,
+                )
+                await self.emit(body(), metadata)
+                span = self.spans("llm.call.1")[0]
+                self.assertAlmostEqual(
+                    span.attributes["openwebui.llm.time_to_first_token_ms"],
+                    (at - 100) * 1000,
+                    places=3,
+                )
+
+    async def test_tool_call_fragment_is_a_first_token(self):
+        metadata = {"chat_id": "chat1", "message_id": "a1"}
+        request = {"model": "qwen3:8b", "stream": True, "messages": []}
+        await self.stream_at(
+            {"choices": [{"delta": {"role": "assistant"}}]}, metadata, 100, body=request
+        )
+        await self.stream_at(
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {"index": 0, "id": "c1", "function": {"name": "vivia_calc"}}
+                            ]
+                        },
+                        "finish_reason": "tool_calls",
+                    }
+                ]
+            },
+            metadata,
+            102,
+            body=request,
+        )
+        await self.emit(body(), metadata)
+        span = self.spans("llm.call.1")[0]
+        self.assertEqual(span.attributes["openwebui.llm.time_to_first_token_ms"], 2000)
+
+    async def test_non_streamed_call_has_no_time_to_first_token(self):
+        # 0.10 has no stream hook for a non-streamed reply: no call is ever
+        # observed, so no TTFT is ever invented.
+        metadata = {"chat_id": "chat1", "message_id": "a1"}
+        await self.filter.inlet({}, metadata)
+        await self.emit(body(), metadata)
+        span = self.spans("llm.call.1")[0]
+        self.assertNotIn("openwebui.llm.time_to_first_token_ms", span.attributes)
+
+    async def test_responses_text_delta_sets_time_to_first_token(self):
+        metadata = {"chat_id": "chat1", "message_id": "a1"}
+        request = {"model": "qwen3:8b", "stream": True, "messages": []}
+        await self.stream_at(
+            {"type": "response.created", "response": {}}, metadata, 100, body=request
+        )
+        await self.stream_at(
+            {"type": "response.output_text.delta", "output_index": 0, "delta": "Total"},
+            metadata,
+            102,
+            body=request,
+        )
+        await self.stream_at(
+            {"type": "response.completed", "response": {"output": []}},
+            metadata,
+            103,
+            body=request,
+        )
+        await self.emit(body(), metadata)
+        span = self.spans("llm.call.1")[0]
+        self.assertEqual(span.attributes["openwebui.llm.time_to_first_token_ms"], 2000)
+
 
 if __name__ == "__main__":
     unittest.main()

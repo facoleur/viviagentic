@@ -11,6 +11,10 @@
 [openwebui]
 url = "http://localhost:3000"
 
+# Vu depuis l'hote : les valves du filtre, elles, adressent le reseau Docker.
+[phoenix]
+url = "http://127.0.0.1:6006"
+
 # Premier compte cree => admin.
 [admin]
 name = "admin"

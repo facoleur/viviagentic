@@ -33,12 +33,38 @@ recoit que la question posee.
 
 `src/vivia/mcp.py` expose `now`, `calc`, `roll_dice` et `text_stats` en streamable-HTTP
 sur `http://mcp:8000/mcp`. Ajouter un tool = une fonction decoree `@mcp.tool`.
+L'image embarque le code : apres modification, `docker compose build mcp` puis `up -d`.
+
+### Tools qui rendent une vue
+
+`chart`, `graph` et `table` sont des MCP Apps : ils affichent une vue dans la conversation
+au lieu de renvoyer du texte. Le tool porte un `resourceUri` en `ui://`, le serveur sert le
+HTML correspondant en `text/html;profile=mcp-app`, et Open WebUI l'affiche dans une iframe
+sandboxee, sous le message. Les documents sont dans `src/vivia/ui.py`.
+
+- `chart` : barres groupees, lignes ou aires, axes a graduations rondes, survol, legende.
+- `graph` : graphe dispose par forces, noeuds deplacables, groupes colores, aretes dirigees.
+- `table` : tableau trie par colonne et filtrable, colonnes numeriques alignees a droite.
+
+Trois contraintes de l'hote dictent la forme de ces documents :
+
+- CSP `default-src 'none'` avec `script-src 'unsafe-inline'`. L'inline passe, le reseau non :
+  tout est ecrit a la main, sans CDN ni `fetch`, ce qui evite d'avoir a declarer des domaines.
+- L'iframe n'a pas `allow-same-origin` : origine opaque, donc ni `localStorage` ni cookie.
+- Open WebUI repond `inline` a `ui/request-display-mode` : la vue s'affiche dans le fil, pas
+  dans un panneau lateral, et sa hauteur est pilotee par `ui/notifications/size-changed`.
+  Le panneau lateral reste celui des artifacts, alimente par un bloc ```html dans la reponse.
+
+Le dialogue est du JSON-RPC 2.0 par `postMessage`. L'hote n'envoie `tool-input` puis
+`tool-result` qu'apres avoir recu `ui/notifications/initialized` : le rendu s'accroche a
+cette notification, jamais a `load`.
 
 ## Telemetrie
 
 La filter function `openwebui/functions/phoenix_tracing.py` (installee par `make configure`)
-emet une trace par conversation, un span CHAIN par tour de chat et un span TOOL enfant
-par appel d'outil, au format OpenInference, vers `http://phoenix:6006/v1/traces`.
+emet une trace par conversation, un span CHAIN par tour de chat, puis des spans enfants
+LLM pour chaque appel au modele et TOOL pour les executions d'outils, au format
+OpenInference, vers `http://phoenix:6006/v1/traces`.
 Traces visibles sur http://127.0.0.1:6006 (projet
 `open-webui`), sans authentification : `PHOENIX_ENABLE_AUTH=false`, sinon l'ingestion OTLP
 exigerait une cle d'API.
@@ -51,19 +77,56 @@ Phoenix ignore les spans deja recus avec le meme identifiant, y compris la racin
 reenvoyee a chaque tour. `session.id` reste egal au `chat_id` ; le `session_id` WebUI
 (connexion navigateur) n'est jamais utilise pour regrouper les conversations.
 
-Compatible avec le format `output` d'Open WebUI 0.13 : seuls les `function_call` du
+Compatible avec le format `output` d'Open WebUI 0.10 : seuls les `function_call` du
 message courant sont traces, avec leur `function_call_output` associe par `call_id`,
 leurs arguments, leur statut et leurs horaires d'execution. Sans horaires disponibles,
 le span outil a une duree nulle et `openwebui.tool.timing_available=false`.
+
+Open WebUI 0.10 n'a pas de hook `request` (ajoute seulement en 0.12) : aucun appel LLM
+n'est donc annonce avant que le fournisseur ne reponde. `stream` detecte lui-meme le debut
+d'un nouvel appel, au premier evenement recu, en comparant l'identite du dict `__body__`
+qu'il recoit a celui du dernier appel connu — chaque iteration de la boucle d'outils en
+recoit un nouveau (`new_form_data`), ce qui fournit la frontiere. `stream` reassemble
+ensuite la reponse (texte, raisonnement expose, appels d'outils), sa raison de fin et ses
+compteurs de tokens. Les spans `llm.call.1`, `llm.call.2`, etc. suivent donc la sequence
+LLM -> outils -> LLM, avec un input/output JSON et des messages structures OpenInference.
+Les compteurs restent sur les spans LLM pour eviter de les compter deux fois. Le
+raisonnement expose est distingue du texte de reponse dans les contenus `reasoning`.
+
+Les snapshots d'entree refletent le `__body__` recu par `stream`, avant les derniers
+ajustements du routeur fournisseur (par exemple le system prompt du modele workspace).
+Les timestamps mesurent du premier evenement `stream` a l'evenement terminal, sans inclure
+l'execution des outils. Les usages recus apres l'evenement terminal sont conserves sans
+prolonger la duree. Un flux sans evenement terminal reste incomplet (statut UNSET).
+Sans streaming (0.10 n'a alors aucun hook intermediaire), un seul appel LLM est renseigne
+depuis `outlet`, sans snapshot d'entree ; sa duree inclut le post-traitement. Un tour
+abandonne avant `outlet` n'est pas exporte.
 
 Les spans sont emis dans `outlet`. `inlet` conserve le debut du tour dans le dictionnaire
 `__metadata__` partage par les hooks inline ; a defaut, le timestamp du message est utilise.
 Sans `chat_id`, chaque reponse obtient sa propre trace. Les anciennes traces ne sont pas
 migrees : le regroupement s'applique aux tours emis avec cette version du filtre.
 
-Tests du filtre (exporteur en memoire, sans appel LLM ni envoi a Phoenix) :
+### Votes utilisateur
+
+`make annotate` (`src/vivia/annotate.py`) reporte les votes 👍/👎 d'Open WebUI en annotations
+Phoenix, sur le span du tour note. Le filtre derivant ses identifiants par hachage de
+(projet, utilisateur, `chat_id`, `message_id`), le script rejoue ce calcul depuis l'exterieur :
+un vote laisse apres coup retrouve son span sans qu'aucun etat n'ait ete conserve.
+`identifier` vaut l'id du feedback, donc relancer la commande met a jour au lieu d'empiler.
+`tests/test_annotate.py` echoue si le filtre et le script divergent sur ce calcul.
+
+### Latence
+
+Les spans LLM portent `openwebui.llm.time_to_first_token_ms`, mesure du debut de l'appel
+(premier evenement `stream` recu) au premier fragment reellement emis par le modele — texte, raisonnement ou arguments d'outil.
+Les evenements de role, d'usage ou d'ouverture d'item n'en sont pas un. OpenInference n'ayant
+pas de convention de TTFT, l'attribut reste dans le namespace `openwebui`. Sans streaming,
+il est absent plutot qu'estime.
+
+## Tests
 
 ```sh
-uv run --with arize-phoenix-otel --with openinference-semantic-conventions \
-  python -m unittest discover -s tests -v
+make test   # tous les tests, sans appel LLM, sans conteneur, sans reseau
+make lint
 ```

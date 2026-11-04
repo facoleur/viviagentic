@@ -8,10 +8,16 @@ dependencies = ["fastmcp>=4.1", "tzdata>=2025.1"]
 [project.scripts]
 vivia-mcp = "vivia.mcp:main"
 vivia-configure = "vivia.configure:main"
+vivia-annotate = "vivia.annotate:main"
 
 [dependency-groups]
 ops = ["httpx>=0.28"]
-dev = ["ruff>=0.14"]
+dev = [
+    "arize-phoenix-otel>=0.9",
+    "openinference-semantic-conventions>=0.1",
+    "pytest>=8",
+    "ruff>=0.14",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -23,3 +29,9 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+# Le filtre vit dans openwebui/functions/, hors du package src/ : les tests
+# l'importent par son chemin, depuis la racine du depot.
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

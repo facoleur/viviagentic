@@ -3,7 +3,9 @@ name: vivia
 services:
   # Seul service publié vers l'extérieur.
   open-webui:
-    image: ghcr.io/open-webui/open-webui:main
+    # Pinné sur 0.10 : la filter function Phoenix cible cette version
+    # (son hook `request`, ajouté en 0.12, n'existe pas ici).
+    image: ghcr.io/open-webui/open-webui:v0.10.2
     ports: ["${VIVIA_PORT:-3000}:8080"]
     environment:
       OLLAMA_BASE_URL: http://ollama:11434

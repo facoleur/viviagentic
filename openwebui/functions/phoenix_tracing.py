@@ -1,11 +1,19 @@
 """
 title: Phoenix Tracing
 author: vivia
-version: 0.3.0
-description: Une trace par conversation, un span par tour et par appel d'outil.
+version: 0.6.0
+description: Une trace par conversation, avec les tours, appels LLM (dont le TTFT) et outils.
 requirements: arize-phoenix-otel, openinference-semantic-conventions
 """
 
+# Cible exclusivement Open WebUI 0.10 : son hook de filtre `request` (ajouté
+# en 0.12 seulement) n'existe pas. Un appel LLM n'est donc jamais annoncé
+# avant que le fournisseur ne reponde : il est detecte au premier evenement
+# `stream`, et une nouvelle iteration de la boucle d'outils est detectee par
+# changement d'identite du `body` recu (chaque iteration recoit un nouveau
+# dict `new_form_data`, cf. middleware.py de 0.10).
+
+import copy
 import hashlib
 import json
 import logging
@@ -18,6 +26,7 @@ from openinference.semconv.trace import OpenInferenceSpanKindValues as Kind
 from openinference.semconv.trace import SpanAttributes as SA
 from opentelemetry import trace
 from opentelemetry.context import Context
+from opentelemetry.sdk.trace import SpanLimits
 from opentelemetry.sdk.trace.id_generator import RandomIdGenerator
 from phoenix.otel import register
 from pydantic import BaseModel, Field
@@ -25,6 +34,237 @@ from pydantic import BaseModel, Field
 log = logging.getLogger(__name__)
 _SPAN_IDS: ContextVar[tuple[int, int] | None] = ContextVar("phoenix_span_ids", default=None)
 _STARTED = "vivia_phoenix_started_ns"
+_CALLS = "vivia_phoenix_llm_calls"
+
+
+def _parts_text(parts) -> str:
+    if isinstance(parts, str):
+        return parts
+    return "\n".join(p.get("text", "") for p in parts or [] if isinstance(p, dict))
+
+
+def _responses_messages(items: list[dict]) -> list[dict]:
+    """Normalize provider output items, preserving reasoning/text/tool order."""
+    messages = []
+    for item in items:
+        kind = item.get("type")
+        if kind == "message":
+            messages.append(
+                {"role": item.get("role", "assistant"), "content": item.get("content", [])}
+            )
+        elif kind == "reasoning":
+            messages.append(
+                {
+                    "role": "assistant",
+                    "reasoning_content": _parts_text(item.get("content") or item.get("summary")),
+                }
+            )
+        elif kind == "function_call":
+            messages.append(
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": item.get("call_id") or item.get("id", ""),
+                            "type": "function",
+                            "function": {
+                                "name": item.get("name", ""),
+                                "arguments": item.get("arguments", ""),
+                            },
+                        }
+                    ],
+                }
+            )
+    return messages
+
+
+def _message_attributes(messages: list[dict], prefix: str) -> dict:
+    """OpenInference's indexed attributes drive Phoenix's structured chat view."""
+    attrs = {}
+    for i, message in enumerate(messages):
+        key = f"{prefix}.{i}.message"
+        attrs[f"{key}.role"] = message.get("role", "assistant")
+        for field in ("name", "tool_call_id"):
+            if message.get(field):
+                attrs[f"{key}.{field}"] = str(message[field])
+        content = message.get("content")
+        if content is not None:
+            attrs[f"{key}.content"] = _text(content)
+        parts = []
+        reasoning = message.get("reasoning_content") or message.get("reasoning")
+        if reasoning:
+            parts.append({"type": "reasoning", "text": _text(reasoning)})
+        if isinstance(content, list):
+            parts.extend(content)
+        elif content:
+            parts.append({"type": "text", "text": content})
+        for j, part in enumerate(parts):
+            if not isinstance(part, dict):
+                continue
+            part_key = f"{key}.contents.{j}.message_content"
+            kind = part.get("type", "text")
+            if kind in {
+                "input_text",
+                "output_text",
+                "summary_text",
+                "reasoning_text",
+                "text",
+                "reasoning",
+            }:
+                attrs[f"{part_key}.type"] = (
+                    "reasoning"
+                    if kind in {"reasoning", "reasoning_text", "summary_text"}
+                    else "text"
+                )
+                attrs[f"{part_key}.text"] = part.get("text", "")
+            elif kind in {"image_url", "input_image"}:
+                url = part.get("image_url", "")
+                attrs[f"{part_key}.type"] = "image"
+                attrs[f"{part_key}.image.image.url"] = (
+                    url.get("url", "") if isinstance(url, dict) else url
+                )
+        for j, call in enumerate(message.get("tool_calls") or []):
+            call_key = f"{key}.tool_calls.{j}.tool_call"
+            attrs[f"{call_key}.id"] = str(call.get("id", ""))
+            fn = call.get("function") or {}
+            attrs[f"{call_key}.function.name"] = fn.get("name", "")
+            attrs[f"{call_key}.function.arguments"] = _dump(fn.get("arguments", ""))
+    return attrs
+
+
+def _new_call(body: dict | None, now: int) -> dict:
+    body = body or {}
+    return {
+        "id": uuid4().hex,
+        "started": now,
+        "model": body.get("model", "unknown"),
+        "input": copy.deepcopy({k: body[k] for k in ("messages", "tools") if k in body}),
+        "parameters": copy.deepcopy(
+            {
+                k: body[k]
+                for k in (
+                    "temperature",
+                    "top_p",
+                    "max_tokens",
+                    "max_completion_tokens",
+                    "stop",
+                    "seed",
+                    "reasoning_effort",
+                )
+                if k in body
+            }
+        ),
+        "choices": {},
+        "items": {},
+        "usage": {},
+        "finish_reasons": {},
+        "completed": False,
+        # Identite du dict recu par le hook stream, jamais relue pour son
+        # contenu : seule une comparaison `is` sert a detecter un nouvel
+        # appel (chaque iteration de la boucle d'outils en recoit un neuf).
+        "_body": body,
+    }
+
+
+def _first_token(call: dict, now: int, fragment) -> None:
+    # Le TTFT se mesure sur le premier fragment reellement emis par le modele :
+    # les evenements de role, d'usage ou d'ouverture d'item n'en sont pas un.
+    if fragment:
+        call.setdefault("first_token", now)
+
+
+def _observe_chat_chunk(call: dict, event: dict, now: int) -> None:
+    for choice in event.get("choices") or []:
+        index = choice.get("index", 0)
+        message = call["choices"].setdefault(index, {"role": "assistant", "tool_calls": {}})
+        delta = choice.get("delta") or choice.get("message") or {}
+        for key in ("content", "reasoning_content", "reasoning", "refusal"):
+            if isinstance(delta.get(key), str):
+                message[key] = message.get(key, "") + delta[key]
+                _first_token(call, now, delta[key])
+        for item in delta.get("tool_calls") or []:
+            tool = message["tool_calls"].setdefault(item.get("index", 0), {"function": {}})
+            if item.get("id"):
+                tool["id"] = item["id"]
+            tool["type"] = item.get("type", "function")
+            for key in ("name", "arguments"):
+                value = (item.get("function") or {}).get(key)
+                if value:
+                    tool["function"][key] = tool["function"].get(key, "") + value
+                    _first_token(call, now, value)
+        if choice.get("finish_reason"):
+            call["finish_reasons"][index] = choice["finish_reason"]
+    if call["choices"] and len(call["finish_reasons"]) == len(call["choices"]):
+        call.setdefault("ended", now)
+        call["completed"] = True
+
+
+def _observe_responses_event(call: dict, event: dict, now: int) -> None:
+    kind = event.get("type", "")
+    response = event.get("response") or {}
+    if response.get("model"):
+        call["response_model"] = response["model"]
+    if response.get("usage"):
+        call["usage"].update(response["usage"])
+    index = event.get("output_index", 0)
+    if kind in {"response.output_item.added", "response.output_item.done"}:
+        call["items"][index] = copy.deepcopy(event["item"])
+    elif kind == "response.function_call_arguments.delta":
+        item = call["items"].setdefault(index, {"type": "function_call"})
+        item["arguments"] = item.get("arguments", "") + event.get("delta", "")
+        _first_token(call, now, event.get("delta", ""))
+    elif kind in {
+        "response.output_text.delta",
+        "response.reasoning_text.delta",
+        "response.reasoning_summary_text.delta",
+    }:
+        reasoning = "reasoning" in kind
+        item = call["items"].setdefault(index, {"type": "reasoning" if reasoning else "message"})
+        # Terminal item/response snapshots replace these partial deltas, never append twice.
+        field = "summary" if "summary" in kind else "content"
+        parts = item.setdefault(field, [])
+        part_index = event.get("summary_index" if field == "summary" else "content_index", 0)
+        while len(parts) <= part_index:
+            parts.append({"type": "output_text", "text": ""})
+        parts[part_index]["text"] += event.get("delta", "")
+        _first_token(call, now, event.get("delta", ""))
+    elif kind in {"response.completed", "response.incomplete", "response.failed"}:
+        if "output" in response:
+            call["items"] = dict(enumerate(copy.deepcopy(response["output"])))
+        call["ended"] = now
+        call["completed"] = kind == "response.completed"
+        call["finish_reasons"][0] = (response.get("incomplete_details") or {}).get(
+            "reason"
+        ) or kind.removeprefix("response.")
+        if kind == "response.failed":
+            call["error"] = response.get("error") or "Provider response failed"
+
+
+def _completion_messages(call: dict) -> list[dict]:
+    if call.get("items"):
+        return _responses_messages([item for _, item in sorted(call["items"].items())])
+    messages = []
+    for _, message in sorted(call["choices"].items()):
+        normalized = dict(message)
+        normalized["tool_calls"] = [t for _, t in sorted(message["tool_calls"].items())]
+        messages.append(normalized)
+    return messages
+
+
+def _usage_attributes(usage: dict) -> dict:
+    attrs = {}
+    for attr, aliases in (
+        (SA.LLM_TOKEN_COUNT_PROMPT, ("prompt_tokens", "input_tokens", "prompt_eval_count")),
+        (SA.LLM_TOKEN_COUNT_COMPLETION, ("completion_tokens", "output_tokens", "eval_count")),
+        (SA.LLM_TOKEN_COUNT_TOTAL, ("total_tokens",)),
+    ):
+        value = next((usage[k] for k in aliases if isinstance(usage.get(k), int)), None)
+        if value is not None:
+            attrs[attr] = value
+    details = usage.get("completion_tokens_details") or usage.get("output_tokens_details") or {}
+    if isinstance(details.get("reasoning_tokens"), int):
+        attrs[SA.LLM_TOKEN_COUNT_COMPLETION_DETAILS_REASONING] = details["reasoning_tokens"]
+    return attrs
 
 
 def _dump(value) -> str:
@@ -85,6 +325,7 @@ class Filter:
                 batch=True,
                 set_global_tracer_provider=False,
                 id_generator=ConversationIds(),
+                span_limits=SpanLimits(max_attributes=4096),
             ).get_tracer(__name__)
         return self._tracer
 
@@ -97,11 +338,48 @@ class Filter:
             _SPAN_IDS.reset(token)
 
     async def inlet(self, body: dict, __metadata__: dict | None = None) -> dict:
-        # Open WebUI 0.13 passes this same dict to the inline outlet. No shared
+        # Open WebUI 0.10 passes this same dict to the inline outlet. No shared
         # per-request cache: abandoned requests cannot leak or collide here.
         if __metadata__ is not None:
             __metadata__.setdefault(_STARTED, time.time_ns())
         return body
+
+    async def stream(
+        self, event: dict, __metadata__: dict | None = None, __body__: dict | None = None
+    ) -> dict:
+        if __metadata__ is None or not isinstance(event, dict):
+            return event
+        kind = event.get("type", "")
+        if not (
+            any(k in event for k in ("choices", "usage", "error"))
+            or kind.startswith("response.")
+            or kind == "error"
+        ):
+            return event
+        try:
+            now = time.time_ns()
+            calls = __metadata__.setdefault(_CALLS, [])
+            # No pre-call hook exists in 0.10 to announce a new LLM call: detect
+            # it here, on the first event of either the turn or a new tool-loop
+            # iteration (a fresh __body__ dict object each time).
+            if not calls or (__body__ is not None and calls[-1]["_body"] is not __body__):
+                calls.append(_new_call(__body__, now))
+            call = calls[-1]
+            call["last_event"] = now
+            if event.get("model"):
+                call["response_model"] = event["model"]
+            if event.get("usage"):
+                call["usage"].update(event["usage"])
+            if kind.startswith("response."):
+                _observe_responses_event(call, event, now)
+            else:
+                _observe_chat_chunk(call, event, now)
+            if event.get("error") or kind == "error":
+                call["error"] = copy.deepcopy(event.get("error") or event)
+                call["ended"] = now
+        except Exception:
+            log.exception("Phoenix stream capture failed")
+        return event
 
     async def outlet(
         self, body: dict, __metadata__: dict | None = None, __user__: dict | None = None
@@ -185,6 +463,9 @@ class Filter:
         )
         try:
             failed = self._trace_tools(span, message, scope, common, ended)
+            failed |= self._trace_llms(
+                span, message, metadata, str(body.get("model", "unknown")), scope, common, ended
+            )
             span.set_status(trace.Status(trace.StatusCode.ERROR if failed else trace.StatusCode.OK))
         finally:
             span.end(end_time=ended)
@@ -241,4 +522,117 @@ class Filter:
             elif result and status == "completed":
                 span.set_status(trace.Status(trace.StatusCode.OK))
             span.end(end_time=end)
+        return failed
+
+    def _trace_llms(
+        self,
+        parent,
+        message: dict,
+        metadata: dict,
+        model: str,
+        scope: tuple,
+        common: dict,
+        ended: int,
+    ) -> bool:
+        calls = metadata.get(_CALLS) or []
+        failed = False
+        count = 0
+        # No calls were ever observed: either the reply was non-streamed (0.10
+        # has no stream hook for it), or this outlet run is replaying stored
+        # history rather than a live turn (inlet never ran, no _STARTED). Only
+        # the former gets a synthetic LLM span — inventing one for the latter
+        # would manufacture a call out of nothing.
+        entries = calls or ([None] if _STARTED in metadata else [])
+        for call in entries:
+            count += 1
+            if call is not None:
+                output = _completion_messages(call)
+                end = call.get("ended") or call["last_event"]
+                usage = call["usage"]
+                completed = call["completed"]
+                reasons = list(call["finish_reasons"].values())
+                started = call["started"]
+                call_model = call["model"]
+                response_model = call.get("response_model")
+                call_input = call["input"]
+                call_parameters = call["parameters"]
+                call_id = call["id"]
+                first_token = call.get("first_token")
+                error = call.get("error")
+                source = "stream_filter"
+            else:
+                # The completed outlet is the only source; its time includes
+                # post-processing, and the pre-call input is never captured.
+                output = _responses_messages(message.get("output") or []) or [
+                    {"role": "assistant", "content": message.get("content", "")}
+                ]
+                end, completed = ended, True
+                usage = message.get("usage") or {}
+                reasons = [message["finish_reason"]] if message.get("finish_reason") else []
+                started = ended
+                call_model = model
+                response_model = None
+                call_input = {}
+                call_parameters = {}
+                # Stable across repeated outlet calls for the same message,
+                # unlike a freshly generated id — needed for reproducible spans.
+                call_id = f"outlet:{message.get('id') or metadata.get('message_id') or ''}"
+                first_token = None
+                error = None
+                source = "outlet"
+            failed |= bool(error)
+            attributes = {
+                **_message_attributes(call_input.get("messages", []), SA.LLM_INPUT_MESSAGES),
+                **_message_attributes(output, SA.LLM_OUTPUT_MESSAGES),
+                **_usage_attributes(usage),
+            }
+            for i, tool in enumerate(call_input.get("tools") or []):
+                attributes[f"llm.tools.{i}.tool.json_schema"] = _dump(tool)
+            # Keep the full JSON and identity even if a long chat exceeds the
+            # SDK's limit for indexed attributes. They are inserted last.
+            attributes.update(
+                {
+                    **common,
+                    SA.OPENINFERENCE_SPAN_KIND: Kind.LLM.value,
+                    SA.LLM_MODEL_NAME: str(response_model or call_model),
+                    SA.LLM_REQUEST_MODEL_NAME: str(call_model),
+                    SA.LLM_INVOCATION_PARAMETERS: _dump(call_parameters),
+                    SA.INPUT_VALUE: _dump(call_input),
+                    SA.INPUT_MIME_TYPE: "application/json",
+                    SA.OUTPUT_VALUE: _dump(
+                        {"messages": output, **({"error": error} if error else {})}
+                    ),
+                    SA.OUTPUT_MIME_TYPE: "application/json",
+                    "openwebui.llm.sequence": count,
+                    "openwebui.llm.completed": completed,
+                    "openwebui.llm.input_source": source,
+                    "openwebui.llm.output_source": source,
+                    "openwebui.llm.structured_attributes_truncated": len(attributes) + 20 > 4096,
+                    "openwebui.message.id": str(
+                        message.get("id") or metadata.get("message_id") or ""
+                    ),
+                }
+            )
+            if reasons:
+                attributes[SA.LLM_FINISH_REASON] = ",".join(reasons)
+            # OpenInference n'a pas de convention de TTFT : attribut maison.
+            # Seul le streaming en fournit un ; sans lui, ne rien inventer.
+            if first_token:
+                attributes["openwebui.llm.time_to_first_token_ms"] = (
+                    first_token - started
+                ) / 1_000_000
+            span = self._span(
+                f"llm.call.{count}",
+                scope,
+                ("llm", parent.get_span_context().span_id, call_id),
+                context=trace.set_span_in_context(parent, Context()),
+                start_time=started,
+                attributes=attributes,
+            )
+            if error:
+                span.set_status(trace.Status(trace.StatusCode.ERROR, _dump(error)))
+            elif completed:
+                span.set_status(trace.Status(trace.StatusCode.OK))
+            span.end(end_time=max(started, end))
+        parent.set_attribute("openwebui.llm.call_count", count)
         return failed
