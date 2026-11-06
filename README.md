@@ -77,7 +77,7 @@ Phoenix ignore les spans deja recus avec le meme identifiant, y compris la racin
 reenvoyee a chaque tour. `session.id` reste egal au `chat_id` ; le `session_id` WebUI
 (connexion navigateur) n'est jamais utilise pour regrouper les conversations.
 
-Compatible avec le format `output` d'Open WebUI 0.13 : seuls les `function_call` du
+Compatible avec le format `output` d'Open WebUI 0.10 a 0.13 : seuls les `function_call` du
 message courant sont traces, avec leur `function_call_output` associe par `call_id`,
 leurs arguments, leur statut et leurs horaires d'execution. Sans horaires disponibles,
 le span outil a une duree nulle et `openwebui.tool.timing_available=false`.
@@ -97,6 +97,15 @@ Un flux sans evenement terminal reste incomplet (statut UNSET). Sans streaming, 
 l'appel final observable est renseigne depuis `outlet` ; sa duree inclut le post-traitement.
 Sans hooks de capture (ancien historique ou appel `/api/chat/completed` seul), aucun
 appel LLM intermediaire n'est invente. Un tour abandonne avant `outlet` n'est pas exporte.
+
+Open WebUI 0.10 et 0.11 n'ont pas de hook `request` (il apparait en 0.12). Le filtre le
+detecte (aucun appel a `request` pendant le tour) et se replie sur `inlet` et `stream` :
+chaque nouvelle reponse du fournisseur ouvre un span LLM, qui commence a son premier
+evenement recu. Le premier appel reprend l'entree vue par `inlet`
+(`openwebui.llm.input_source=inlet_filter`, avant ajout des outils et du system prompt) ;
+les suivants, apres execution des outils, n'ont pas d'entree
+(`input_source=unavailable`). Sans streaming, l'appel unique est reconstruit depuis `inlet`
+et `outlet`. Tours, outils, sorties, raisons de fin et compteurs de tokens sont identiques.
 
 Les spans sont emis dans `outlet`. `inlet` conserve le debut du tour dans le dictionnaire
 `__metadata__` partage par les hooks inline ; a defaut, le timestamp du message est utilise.
@@ -118,7 +127,8 @@ Les spans LLM portent `openwebui.llm.time_to_first_token_ms`, mesure du hook `re
 premier fragment reellement emis par le modele — texte, raisonnement ou arguments d'outil.
 Les evenements de role, d'usage ou d'ouverture d'item n'en sont pas un. OpenInference n'ayant
 pas de convention de TTFT, l'attribut reste dans le namespace `openwebui`. Sans streaming,
-il est absent plutot qu'estime.
+ou avant Open WebUI 0.12 (pas de hook `request`, donc pas de debut d'appel), il est absent
+plutot qu'estime.
 
 ## Lineage SQL
 

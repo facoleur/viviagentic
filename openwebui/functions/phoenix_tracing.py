@@ -1,8 +1,8 @@
 """
 title: Phoenix Tracing
 author: vivia
-version: 0.5.0
-description: Une trace par conversation, avec les tours, appels LLM (dont le TTFT) et outils.
+version: 0.6.0
+description: Une trace par conversation (tours, appels LLM, TTFT, outils). Open WebUI 0.10+.
 requirements: arize-phoenix-otel, openinference-semantic-conventions
 """
 
@@ -28,6 +28,19 @@ log = logging.getLogger(__name__)
 _SPAN_IDS: ContextVar[tuple[int, int] | None] = ContextVar("phoenix_span_ids", default=None)
 _STARTED = "vivia_phoenix_started_ns"
 _CALLS = "vivia_phoenix_llm_calls"
+# Open WebUI < 0.12 n'a pas de hook `request` : le corps vu par `inlet` est alors la seule
+# entree disponible, et les appels LLM sont ouverts par `stream` au premier evenement.
+_INLET = "vivia_phoenix_inlet_call"
+_HAS_REQUEST = "vivia_phoenix_request_hook"
+_PARAMETERS = (
+    "temperature",
+    "top_p",
+    "max_tokens",
+    "max_completion_tokens",
+    "stop",
+    "seed",
+    "reasoning_effort",
+)
 
 
 def _parts_text(parts) -> str:
@@ -199,6 +212,35 @@ def _observe_responses_event(call: dict, event: dict, now: int) -> None:
             call["error"] = response.get("error") or "Provider response failed"
 
 
+def _new_call(body: dict, now: int, source: str) -> dict:
+    # Snapshot only model inputs, never metadata (which contains our state,
+    # tool callables and potentially credentials). Later hooks mutate messages.
+    return {
+        "id": uuid4().hex,
+        "started": now,
+        "model": body.get("model", "unknown"),
+        "stream": body.get("stream", False),
+        "input": copy.deepcopy({k: body[k] for k in ("messages", "tools") if k in body}),
+        "input_source": source,
+        "parameters": copy.deepcopy({k: body[k] for k in _PARAMETERS if k in body}),
+        "choices": {},
+        "items": {},
+        "usage": {},
+        "finish_reasons": {},
+        "completed": False,
+    }
+
+
+def _starts_response(event: dict) -> bool:
+    """Evenement qui ouvre une reponse fournisseur : contenu ou erreur, pas un usage seul."""
+    kind = event.get("type", "")
+    return (
+        kind in {"response.created", "response.in_progress", "error"}
+        or "error" in event
+        or (not kind and bool(event.get("choices")))
+    )
+
+
 def _completion_messages(call: dict) -> list[dict]:
     if call.get("items"):
         return _responses_messages([item for _, item in sorted(call["items"].items())])
@@ -297,60 +339,53 @@ class Filter:
             _SPAN_IDS.reset(token)
 
     async def inlet(self, body: dict, __metadata__: dict | None = None) -> dict:
-        # Open WebUI 0.13 passes this same dict to the inline outlet. No shared
+        # Open WebUI 0.10+ passes this same dict to the inline outlet. No shared
         # per-request cache: abandoned requests cannot leak or collide here.
         if __metadata__ is not None:
-            __metadata__.setdefault(_STARTED, time.time_ns())
+            now = time.time_ns()
+            __metadata__.setdefault(_STARTED, now)
+            if isinstance(body, dict) and "messages" in body:
+                try:
+                    __metadata__.setdefault(_INLET, _new_call(body, now, "inlet_filter"))
+                except Exception:
+                    log.exception("Phoenix inlet capture failed")
         return body
 
     async def request(self, body: dict, __metadata__: dict | None = None) -> dict:
         if __metadata__ is None:
             return body
+        __metadata__[_HAS_REQUEST] = True
         try:
-            # Snapshot only model inputs, never metadata (which contains our state,
-            # tool callables and potentially credentials). Later hooks mutate messages.
-            call = {
-                "id": uuid4().hex,
-                "started": time.time_ns(),
-                "model": body.get("model", "unknown"),
-                "stream": body.get("stream", False),
-                "input": copy.deepcopy({k: body[k] for k in ("messages", "tools") if k in body}),
-                "parameters": copy.deepcopy(
-                    {
-                        k: body[k]
-                        for k in (
-                            "temperature",
-                            "top_p",
-                            "max_tokens",
-                            "max_completion_tokens",
-                            "stop",
-                            "seed",
-                            "reasoning_effort",
-                        )
-                        if k in body
-                    }
-                ),
-                "choices": {},
-                "items": {},
-                "usage": {},
-                "finish_reasons": {},
-                "completed": False,
-            }
+            call = _new_call(body, time.time_ns(), "request_filter")
             __metadata__.setdefault(_CALLS, []).append(call)
         except Exception:
             log.exception("Phoenix request capture failed")
         return body
 
     async def stream(self, event: dict, __metadata__: dict | None = None) -> dict:
-        calls = (__metadata__ or {}).get(_CALLS) or []
-        if not calls or not isinstance(event, dict):
-            return event
-        kind = event.get("type", "")
-        if not (
+        kind = event.get("type", "") if isinstance(event, dict) else ""
+        if not isinstance(event, dict) or not (
             any(k in event for k in ("choices", "usage", "error"))
             or kind.startswith("response.")
             or kind == "error"
         ):
+            return event
+        metadata = __metadata__ or {}
+        calls = metadata.get(_CALLS) or []
+        # < 0.12 : chaque nouvelle reponse du fournisseur ouvre un appel. Le premier
+        # reprend l'entree vue par inlet ; les suivants (apres outils) n'en ont pas.
+        if (
+            _INLET in metadata
+            and not metadata.get(_HAS_REQUEST)
+            and (not calls or (calls[-1].get("ended") and _starts_response(event)))
+        ):
+            call = copy.deepcopy(metadata[_INLET])
+            call.update(id=uuid4().hex, started=time.time_ns(), stream=True, legacy=True)
+            if calls:
+                call.update(input={}, input_source="unavailable")
+            calls = metadata.setdefault(_CALLS, [])
+            calls.append(call)
+        if not calls:
             return event
         call = calls[-1]
         try:
@@ -382,6 +417,9 @@ class Filter:
         return body
 
     def _trace_turn(self, body: dict, metadata: dict, user: dict) -> None:
+        if _INLET in metadata and not metadata.get(_HAS_REQUEST) and not metadata.get(_CALLS):
+            # < 0.12 sans streaming : l'appel n'est connu que par inlet et outlet.
+            metadata[_CALLS] = [{**metadata[_INLET], "legacy": True}]
         messages = body.get("messages") or []
         message_id = metadata.get("message_id") or body.get("id")
         index = next(
@@ -570,7 +608,7 @@ class Filter:
                     SA.OUTPUT_MIME_TYPE: "application/json",
                     "openwebui.llm.sequence": count,
                     "openwebui.llm.completed": completed,
-                    "openwebui.llm.input_source": "request_filter",
+                    "openwebui.llm.input_source": call.get("input_source", "request_filter"),
                     "openwebui.llm.output_source": "stream_filter" if observed else "outlet",
                     "openwebui.llm.structured_attributes_truncated": len(attributes) + 20 > 4096,
                     "openwebui.message.id": str(
@@ -582,7 +620,8 @@ class Filter:
                 attributes[SA.LLM_FINISH_REASON] = ",".join(reasons)
             # OpenInference n'a pas de convention de TTFT : attribut maison.
             # Seul le streaming en fournit un ; sans lui, ne rien inventer.
-            if call.get("first_token"):
+            # Sans hook `request` (< 0.12), le debut de l'appel n'est pas observable.
+            if call.get("first_token") and not call.get("legacy"):
                 attributes["openwebui.llm.time_to_first_token_ms"] = (
                     call["first_token"] - call["started"]
                 ) / 1_000_000
