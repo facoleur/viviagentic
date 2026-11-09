@@ -86,16 +86,24 @@ def main() -> None:
         print("done")
         return
 
-    res = httpx.post(f"{phoenix}/v1/span_annotations", json={"data": payload}, timeout=30)
-    if res.is_success:
+    # `sync=true` : sans lui, Phoenix repond 200 et ignore en silence un span absent
+    # (trace purgee, tour anterieur au filtre). Un envoi par vote isole ces cas.
+    missing = 0
+    with httpx.Client(base_url=phoenix, timeout=30) as client:
         for item in payload:
-            print(f"  {item['result']['label']:>4} -> span {item['span_id']}")
-        print(f"done ({len(payload)} annotation(s))")
-    else:
-        # Un span absent de Phoenix (trace purgee, filtre inactif a l'epoque)
-        # fait echouer le lot entier : le signaler plutot que de le masquer.
-        print(f"  ! POST /v1/span_annotations -> {res.status_code} {res.text[:300]}")
-        raise SystemExit(1)
+            res = client.post(
+                "/v1/span_annotations", params={"sync": "true"}, json={"data": [item]}
+            )
+            label = f"{item['result']['label']:>4} -> span {item['span_id']}"
+            if res.status_code == 404:
+                missing += 1
+                print(f"  {label} : absent de Phoenix, ignore")
+            elif res.is_success:
+                print(f"  {label}")
+            else:
+                print(f"  ! POST /v1/span_annotations -> {res.status_code} {res.text[:300]}")
+                raise SystemExit(1)
+    print(f"done ({len(payload) - missing} annotation(s), {missing} span(s) introuvable(s))")
 
 
 if __name__ == "__main__":
