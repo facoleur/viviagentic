@@ -106,6 +106,9 @@ evenement recu. Le premier appel reprend l'entree vue par `inlet`
 les suivants, apres execution des outils, n'ont pas d'entree
 (`input_source=unavailable`). Sans streaming, l'appel unique est reconstruit depuis `inlet`
 et `outlet`. Tours, outils, sorties, raisons de fin et compteurs de tokens sont identiques.
+Ces versions n'enregistrent cote serveur que l'`output` du message assistant : `outlet` le
+recoit avec un `content` vide, la reponse du tour est donc reprise des items `message` de
+`output`, comme le fait Open WebUI 0.13.
 
 Les spans sont emis dans `outlet`. `inlet` conserve le debut du tour dans le dictionnaire
 `__metadata__` partage par les hooks inline ; a defaut, le timestamp du message est utilise.

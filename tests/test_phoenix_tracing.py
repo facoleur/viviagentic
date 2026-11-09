@@ -733,3 +733,13 @@ class LegacyOpenWebUITests(Harness):
         self.assertEqual(len(self.spans("llm.call.2")), 0)
         self.assertEqual(span.attributes["openwebui.llm.input_source"], "request_filter")
         self.assertEqual(span.attributes["openwebui.llm.time_to_first_token_ms"], 2000)
+
+    async def test_answer_falls_back_to_output_when_content_is_empty(self):
+        # Open WebUI 0.10 / 0.11 n'enregistrent que `output` : outlet recoit content="".
+        payload = body(output=[*tool(), {"type": "reasoning", "content": [{"text": "Hmm."}]}])
+        payload["messages"][-1]["content"] = ""
+        payload["messages"][-1]["output"].append(
+            {"type": "message", "content": [{"type": "output_text", "text": "Total : 29."}]}
+        )
+        await self.emit(payload)
+        self.assertEqual(self.spans("open-webui.chat")[0].attributes["output.value"], "Total : 29.")

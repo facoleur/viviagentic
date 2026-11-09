@@ -1,7 +1,7 @@
 """
 title: Phoenix Tracing
 author: vivia
-version: 0.7.0
+version: 0.7.1
 description: Une trace par tour, une session Phoenix par chat (LLM, TTFT, outils). OWUI 0.10+.
 requirements: arize-phoenix-otel, openinference-semantic-conventions
 """
@@ -47,6 +47,16 @@ def _parts_text(parts) -> str:
     if isinstance(parts, str):
         return parts
     return "\n".join(p.get("text", "") for p in parts or [] if isinstance(p, dict))
+
+
+def _answer(message: dict):
+    """Reponse finale du tour. Open WebUI < 0.13 n'enregistre que `output` cote serveur :
+    `content` arrive vide dans outlet, le texte est celui des items `message` (comme 0.13)."""
+    if message.get("content"):
+        return message["content"]
+    items = message.get("output") or []
+    texts = (_parts_text(i.get("content")) for i in items if i.get("type") == "message")
+    return "\n".join(t for t in texts if t.strip())
 
 
 def _responses_messages(items: list[dict]) -> list[dict]:
@@ -469,7 +479,7 @@ class Filter:
                     ),
                     "",
                 ),
-                SA.OUTPUT_VALUE: _text(message.get("content", "")),
+                SA.OUTPUT_VALUE: _text(_answer(message)),
                 "openwebui.message.id": str(message_id),
             },
         )
@@ -558,10 +568,7 @@ class Filter:
                 # Non-streamed replies have no stream hook. The completed outlet
                 # provides the response, but its time includes post-processing.
                 output = _responses_messages(message.get("output") or []) or [
-                    {
-                        "role": "assistant",
-                        "content": message.get("content", ""),
-                    }
+                    {"role": "assistant", "content": _answer(message)}
                 ]
                 end, completed = ended, True
                 usage = (message.get("usage") or {}) if len(calls) == 1 else {}
