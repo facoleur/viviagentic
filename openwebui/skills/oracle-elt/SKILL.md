@@ -13,7 +13,7 @@ Couches du DWH :
 - **SDE** : données transformées, prêtes à être réutilisées, dont les tables **P** (préparatoires,
   pérennes, avec tout l'historique : P tiers, P flux…). Réutiliser une table P existante plutôt
   que recalculer la même logique dans un mart.
-- **DMD** : data marts (tables de fait, de dimension et tables W).
+- **DMD** : data marts (tables de fait, de dimension et tables W, « wide » : tables larges dénormalisées).
 
 ## 1. Règles absolues
 
