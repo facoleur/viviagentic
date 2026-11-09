@@ -743,3 +743,37 @@ class LegacyOpenWebUITests(Harness):
         )
         await self.emit(payload)
         self.assertEqual(self.spans("open-webui.chat")[0].attributes["output.value"], "Total : 29.")
+
+    async def test_untimed_tools_sit_between_the_llm_calls_around_them(self):
+        # Open WebUI 0.10 ne date pas les function_call : l'outil est place apres l'appel LLM
+        # qui l'a demande et avant le suivant, pas a la fin du tour.
+        for call_id in ("c1", "id-differente"):
+            with self.subTest(call_id=call_id):
+                self.exporter.clear()
+                metadata = {"chat_id": f"chat-{call_id}", "message_id": "a1"}
+                await self.inlet_at({"model": "m", "stream": True, "messages": []}, metadata, 100)
+                tc = {"index": 0, "id": "c1", "function": {"name": "vivia_roll_dice"}}
+                await self.stream_at(
+                    {"choices": [{"delta": {"tool_calls": [tc]}, "finish_reason": "tool_calls"}]},
+                    metadata,
+                    103,
+                )
+                await self.stream_at(
+                    {"choices": [{"delta": {"content": "29"}, "finish_reason": "stop"}]},
+                    metadata,
+                    106,
+                )
+                output = tool(call_id)
+                for item in output:
+                    item.pop("started_at", None)
+                    item.pop("ended_at", None)
+                await self.emit(body(output=output), metadata)
+                span = self.spans("tool.vivia_roll_dice")[0]
+                self.assertEqual((span.start_time, span.end_time), (103e9, 106e9))
+                self.assertEqual(span.attributes["openwebui.tool.timing_source"], "llm_calls")
+                self.assertFalse(span.attributes["openwebui.tool.timing_available"])
+                order = sorted(self.spans(), key=lambda s: (s.start_time, s.name))
+                self.assertEqual(
+                    [s.name for s in order if s.name != "open-webui.chat"],
+                    ["llm.call.1", "tool.vivia_roll_dice", "llm.call.2"],
+                )

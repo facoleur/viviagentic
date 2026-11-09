@@ -1,7 +1,7 @@
 """
 title: Phoenix Tracing
 author: vivia
-version: 0.7.1
+version: 0.7.2
 description: Une trace par tour, une session Phoenix par chat (LLM, TTFT, outils). OWUI 0.10+.
 requirements: arize-phoenix-otel, openinference-semantic-conventions
 """
@@ -251,6 +251,27 @@ def _starts_response(event: dict) -> bool:
     )
 
 
+def _tool_windows(calls: list[dict]) -> tuple[dict, list]:
+    """Intervalle de chaque appel d'outil quand Open WebUI ne le date pas (< 0.13) : entre la
+    fin de l'appel LLM qui l'a demande et le debut du suivant. Par id, et dans l'ordre."""
+    observed = [c for c in calls if "last_event" in c]
+    by_id, ordered = {}, []
+    for i, call in enumerate(observed):
+        end = call.get("ended") or call["last_event"]
+        window = (end, max(end, observed[i + 1]["started"]) if i + 1 < len(observed) else end)
+        ids = [t.get("id") for m in call["choices"].values() for t in m["tool_calls"].values()]
+        ids += [
+            item.get("call_id") or item.get("id")
+            for item in call["items"].values()
+            if item.get("type") == "function_call"
+        ]
+        for call_id in ids:
+            ordered.append(window)
+            if call_id:
+                by_id[call_id] = window
+    return by_id, ordered
+
+
 def _completion_messages(call: dict) -> list[dict]:
     if call.get("items"):
         return _responses_messages([item for _, item in sorted(call["items"].items())])
@@ -484,13 +505,16 @@ class Filter:
             },
         )
         try:
-            failed = self._trace_tools(span, message, scope, common, ended)
+            windows = _tool_windows(metadata.get(_CALLS) or [])
+            failed = self._trace_tools(span, message, scope, common, ended, windows)
             failed |= self._trace_llms(span, message, metadata, scope, common, ended)
             span.set_status(trace.Status(trace.StatusCode.ERROR if failed else trace.StatusCode.OK))
         finally:
             span.end(end_time=ended)
 
-    def _trace_tools(self, parent, message: dict, scope: tuple, common: dict, ended: int) -> bool:
+    def _trace_tools(
+        self, parent, message: dict, scope: tuple, common: dict, ended: int, windows: tuple
+    ) -> bool:
         # outlet receives saved Responses-style output, even for Ollama models.
         output = message.get("output") or []
         results = {
@@ -500,6 +524,7 @@ class Filter:
         }
         seen = set()
         failed = False
+        by_id, ordered = windows
         for index, call in enumerate(output):
             if call.get("type") != "function_call":
                 continue
@@ -515,7 +540,15 @@ class Filter:
             start = _ns(call.get("started_at"))
             end = _ns(call.get("ended_at"))
             timed = start is not None and end is not None and end >= start
-            if not timed:
+            source = "output" if timed else "none"
+            window = by_id.get(call_id) or (
+                ordered[len(seen) - 1] if len(seen) <= len(ordered) else None
+            )
+            if not timed and window:
+                # Entre l'appel LLM qui l'a demande et le suivant : place dans la sequence,
+                # duree majoree (elle inclut le traitement Open WebUI autour de l'outil).
+                (start, end), source = window, "llm_calls"
+            elif not timed:
                 # Missing execution times do not justify inventing a duration.
                 start = end = start or end or ended
             attributes = {
@@ -526,6 +559,7 @@ class Filter:
                 "openwebui.tool.call_id": str(call_id),
                 "openwebui.tool.status": status,
                 "openwebui.tool.timing_available": timed,
+                "openwebui.tool.timing_source": source,
             }
             if result:
                 attributes[SA.OUTPUT_VALUE] = _text(result.get("output", ""))

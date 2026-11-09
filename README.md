@@ -79,8 +79,12 @@ filtre : Phoenix ignore un tour deja recu.
 
 Compatible avec le format `output` d'Open WebUI 0.10 a 0.13 : seuls les `function_call` du
 message courant sont traces, avec leur `function_call_output` associe par `call_id`,
-leurs arguments, leur statut et leurs horaires d'execution. Sans horaires disponibles,
-le span outil a une duree nulle et `openwebui.tool.timing_available=false`.
+leurs arguments, leur statut et leurs horaires d'execution. Open WebUI < 0.13 ne date pas
+les appels d'outils : le span outil est alors place entre la fin de l'appel LLM qui l'a
+demande et le debut du suivant (`openwebui.tool.timing_source=llm_calls`,
+`openwebui.tool.timing_available=false`), ce qui garde l'ordre LLM -> outil -> LLM ; sa duree
+est majoree (elle inclut le traitement d'Open WebUI). Sans aucun repere, il a une duree nulle
+a la fin du tour (`timing_source=none`).
 
 `request` photographie le contexte et les schemas d'outils avant chaque appel au modele.
 `stream` reassemble sa reponse (texte, raisonnement expose, appels d'outils), sa raison
