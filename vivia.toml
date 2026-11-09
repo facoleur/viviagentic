@@ -101,3 +101,14 @@ description = "Trace les chats et tool calls vers Phoenix"
 active = true
 global = true
 valves = { endpoint = "http://phoenix:6006", project_name = "open-webui" }
+
+# Reporte chaque vote 👍/👎 sur le span du tour, des qu'il est donne. `project_name`
+# doit etre celui de phoenix_tracing : il entre dans le calcul de l'identifiant du span.
+[[functions]]
+id = "phoenix_feedback"
+name = "Phoenix Feedback"
+type = "event"
+path = "openwebui/functions/phoenix_feedback.py"
+description = "Annote dans Phoenix les tours notes 👍/👎"
+active = true
+valves = { endpoint = "http://phoenix:6006", project_name = "open-webui" }

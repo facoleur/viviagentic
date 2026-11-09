@@ -121,12 +121,20 @@ migrees : le regroupement s'applique aux tours emis avec cette version du filtre
 
 ### Votes utilisateur
 
-`make annotate` (`src/vivia/annotate.py`) reporte les votes 👍/👎 d'Open WebUI en annotations
-Phoenix, sur le span du tour note. Le filtre derivant ses identifiants par hachage de
-(projet, utilisateur, `chat_id`, `message_id`), le script rejoue ce calcul depuis l'exterieur :
-un vote laisse apres coup retrouve son span sans qu'aucun etat n'ait ete conserve.
-`identifier` vaut l'id du feedback, donc relancer la commande met a jour au lieu d'empiler.
-`tests/test_annotate.py` echoue si le filtre et le script divergent sur ce calcul.
+Chaque vote 👍/👎 devient une annotation Phoenix `user_rating` sur le span du tour note
+(`up`/`down`, score 1/0, commentaire en explication), des qu'il est donne : la fonction
+d'evenement `openwebui/functions/phoenix_feedback.py` (installee par `make configure`,
+Open WebUI 0.10+) recoit `feedback.created` et `feedback.updated`, relit le vote et l'envoie
+a Phoenix. Le filtre derivant ses identifiants par hachage de (projet, utilisateur,
+`chat_id`, `message_id`), la fonction rejoue ce calcul sans etat partage ;
+`tests/test_annotate.py` echoue si les deux divergent, et `project_name` doit etre le meme
+dans les valves des deux fonctions. Un vote donne avant que le tour soit exporte est
+renvoye toutes les 5 s (6 essais). `identifier` vaut l'id du feedback : changer son vote ou
+ajouter un commentaire met a jour l'annotation au lieu d'en empiler une.
+
+`make annotate` (`src/vivia/annotate.py`) rattrape les votes existants (anterieurs a la
+fonction, ou donnes pendant un arret de Phoenix) avec la meme logique, lue dans le meme
+fichier. Un vote dont le tour n'a jamais ete trace est signale comme introuvable.
 
 ### Latence
 
