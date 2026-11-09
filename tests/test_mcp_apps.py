@@ -21,6 +21,7 @@ MAX_APP_BYTES = 5 * 1024 * 1024
 APPS = {
     "chart": "ui://vivia/chart.html",
     "graph": "ui://vivia/graph.html",
+    "sql_lineage": "ui://vivia/graph.html",
     "table": "ui://vivia/table.html",
 }
 DOCUMENTS = {
@@ -150,6 +151,14 @@ class PayloadTests(unittest.IsolatedAsyncioTestCase):
         data = result.structured_content
         # Les noeuds non declares sont crees cote vue, pas inventes ici.
         self.assertEqual(data["nodes"], [])
+        self.assertTrue(data["directed"])
+
+    async def test_sql_lineage_payload_groups_columns_by_table(self):
+        sql = "SELECT #pndate#, o.id FROM #SCH#.orders o"
+        result = await call("sql_lineage", sql=sql, columns=True, target="dwh.f")
+        data = result.structured_content
+        self.assertEqual(data["edges"], [{"source": "#SCH#.ORDERS.ID", "target": "DWH.F.ID"}])
+        self.assertEqual(data["nodes"][0], {"id": "#SCH#.ORDERS.ID", "group": "#SCH#.ORDERS"})
         self.assertTrue(data["directed"])
 
     async def test_table_payload_omits_absent_columns(self):

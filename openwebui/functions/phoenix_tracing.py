@@ -1,8 +1,8 @@
 """
 title: Phoenix Tracing
 author: vivia
-version: 0.5.0
-description: Une trace par conversation, avec les tours, appels LLM (dont le TTFT) et outils.
+version: 0.7.2
+description: Une trace par tour, une session Phoenix par chat (LLM, TTFT, outils). OWUI 0.10+.
 requirements: arize-phoenix-otel, openinference-semantic-conventions
 """
 
@@ -28,12 +28,35 @@ log = logging.getLogger(__name__)
 _SPAN_IDS: ContextVar[tuple[int, int] | None] = ContextVar("phoenix_span_ids", default=None)
 _STARTED = "vivia_phoenix_started_ns"
 _CALLS = "vivia_phoenix_llm_calls"
+# Open WebUI < 0.12 n'a pas de hook `request` : le corps vu par `inlet` est alors la seule
+# entree disponible, et les appels LLM sont ouverts par `stream` au premier evenement.
+_INLET = "vivia_phoenix_inlet_call"
+_HAS_REQUEST = "vivia_phoenix_request_hook"
+_PARAMETERS = (
+    "temperature",
+    "top_p",
+    "max_tokens",
+    "max_completion_tokens",
+    "stop",
+    "seed",
+    "reasoning_effort",
+)
 
 
 def _parts_text(parts) -> str:
     if isinstance(parts, str):
         return parts
     return "\n".join(p.get("text", "") for p in parts or [] if isinstance(p, dict))
+
+
+def _answer(message: dict):
+    """Reponse finale du tour. Open WebUI < 0.13 n'enregistre que `output` cote serveur :
+    `content` arrive vide dans outlet, le texte est celui des items `message` (comme 0.13)."""
+    if message.get("content"):
+        return message["content"]
+    items = message.get("output") or []
+    texts = (_parts_text(i.get("content")) for i in items if i.get("type") == "message")
+    return "\n".join(t for t in texts if t.strip())
 
 
 def _responses_messages(items: list[dict]) -> list[dict]:
@@ -199,6 +222,56 @@ def _observe_responses_event(call: dict, event: dict, now: int) -> None:
             call["error"] = response.get("error") or "Provider response failed"
 
 
+def _new_call(body: dict, now: int, source: str) -> dict:
+    # Snapshot only model inputs, never metadata (which contains our state,
+    # tool callables and potentially credentials). Later hooks mutate messages.
+    return {
+        "id": uuid4().hex,
+        "started": now,
+        "model": body.get("model", "unknown"),
+        "stream": body.get("stream", False),
+        "input": copy.deepcopy({k: body[k] for k in ("messages", "tools") if k in body}),
+        "input_source": source,
+        "parameters": copy.deepcopy({k: body[k] for k in _PARAMETERS if k in body}),
+        "choices": {},
+        "items": {},
+        "usage": {},
+        "finish_reasons": {},
+        "completed": False,
+    }
+
+
+def _starts_response(event: dict) -> bool:
+    """Evenement qui ouvre une reponse fournisseur : contenu ou erreur, pas un usage seul."""
+    kind = event.get("type", "")
+    return (
+        kind in {"response.created", "response.in_progress", "error"}
+        or "error" in event
+        or (not kind and bool(event.get("choices")))
+    )
+
+
+def _tool_windows(calls: list[dict]) -> tuple[dict, list]:
+    """Intervalle de chaque appel d'outil quand Open WebUI ne le date pas (< 0.13) : entre la
+    fin de l'appel LLM qui l'a demande et le debut du suivant. Par id, et dans l'ordre."""
+    observed = [c for c in calls if "last_event" in c]
+    by_id, ordered = {}, []
+    for i, call in enumerate(observed):
+        end = call.get("ended") or call["last_event"]
+        window = (end, max(end, observed[i + 1]["started"]) if i + 1 < len(observed) else end)
+        ids = [t.get("id") for m in call["choices"].values() for t in m["tool_calls"].values()]
+        ids += [
+            item.get("call_id") or item.get("id")
+            for item in call["items"].values()
+            if item.get("type") == "function_call"
+        ]
+        for call_id in ids:
+            ordered.append(window)
+            if call_id:
+                by_id[call_id] = window
+    return by_id, ordered
+
+
 def _completion_messages(call: dict) -> list[dict]:
     if call.get("items"):
         return _responses_messages([item for _, item in sorted(call["items"].items())])
@@ -289,7 +362,9 @@ class Filter:
         return self._tracer
 
     def _span(self, name: str, scope: tuple, key: tuple, **kwargs) -> trace.Span:
-        ids = (_id(*scope, size=16), _id(*scope, *key, size=8))
+        # Le trace id ne sert qu'aux racines (les enfants heritent de leur parent) :
+        # une trace par tour, le span id restant celui que recalcule `vivia.annotate`.
+        ids = (_id(*scope, *key, size=16), _id(*scope, *key, size=8))
         token = _SPAN_IDS.set(ids)
         try:
             return self.tracer.start_span(name, **kwargs)
@@ -297,60 +372,53 @@ class Filter:
             _SPAN_IDS.reset(token)
 
     async def inlet(self, body: dict, __metadata__: dict | None = None) -> dict:
-        # Open WebUI 0.13 passes this same dict to the inline outlet. No shared
+        # Open WebUI 0.10+ passes this same dict to the inline outlet. No shared
         # per-request cache: abandoned requests cannot leak or collide here.
         if __metadata__ is not None:
-            __metadata__.setdefault(_STARTED, time.time_ns())
+            now = time.time_ns()
+            __metadata__.setdefault(_STARTED, now)
+            if isinstance(body, dict) and "messages" in body:
+                try:
+                    __metadata__.setdefault(_INLET, _new_call(body, now, "inlet_filter"))
+                except Exception:
+                    log.exception("Phoenix inlet capture failed")
         return body
 
     async def request(self, body: dict, __metadata__: dict | None = None) -> dict:
         if __metadata__ is None:
             return body
+        __metadata__[_HAS_REQUEST] = True
         try:
-            # Snapshot only model inputs, never metadata (which contains our state,
-            # tool callables and potentially credentials). Later hooks mutate messages.
-            call = {
-                "id": uuid4().hex,
-                "started": time.time_ns(),
-                "model": body.get("model", "unknown"),
-                "stream": body.get("stream", False),
-                "input": copy.deepcopy({k: body[k] for k in ("messages", "tools") if k in body}),
-                "parameters": copy.deepcopy(
-                    {
-                        k: body[k]
-                        for k in (
-                            "temperature",
-                            "top_p",
-                            "max_tokens",
-                            "max_completion_tokens",
-                            "stop",
-                            "seed",
-                            "reasoning_effort",
-                        )
-                        if k in body
-                    }
-                ),
-                "choices": {},
-                "items": {},
-                "usage": {},
-                "finish_reasons": {},
-                "completed": False,
-            }
+            call = _new_call(body, time.time_ns(), "request_filter")
             __metadata__.setdefault(_CALLS, []).append(call)
         except Exception:
             log.exception("Phoenix request capture failed")
         return body
 
     async def stream(self, event: dict, __metadata__: dict | None = None) -> dict:
-        calls = (__metadata__ or {}).get(_CALLS) or []
-        if not calls or not isinstance(event, dict):
-            return event
-        kind = event.get("type", "")
-        if not (
+        kind = event.get("type", "") if isinstance(event, dict) else ""
+        if not isinstance(event, dict) or not (
             any(k in event for k in ("choices", "usage", "error"))
             or kind.startswith("response.")
             or kind == "error"
         ):
+            return event
+        metadata = __metadata__ or {}
+        calls = metadata.get(_CALLS) or []
+        # < 0.12 : chaque nouvelle reponse du fournisseur ouvre un appel. Le premier
+        # reprend l'entree vue par inlet ; les suivants (apres outils) n'en ont pas.
+        if (
+            _INLET in metadata
+            and not metadata.get(_HAS_REQUEST)
+            and (not calls or (calls[-1].get("ended") and _starts_response(event)))
+        ):
+            call = copy.deepcopy(metadata[_INLET])
+            call.update(id=uuid4().hex, started=time.time_ns(), stream=True, legacy=True)
+            if calls:
+                call.update(input={}, input_source="unavailable")
+            calls = metadata.setdefault(_CALLS, [])
+            calls.append(call)
+        if not calls:
             return event
         call = calls[-1]
         try:
@@ -382,6 +450,9 @@ class Filter:
         return body
 
     def _trace_turn(self, body: dict, metadata: dict, user: dict) -> None:
+        if _INLET in metadata and not metadata.get(_HAS_REQUEST) and not metadata.get(_CALLS):
+            # < 0.12 sans streaming : l'appel n'est connu que par inlet et outlet.
+            metadata[_CALLS] = [{**metadata[_INLET], "legacy": True}]
         messages = body.get("messages") or []
         message_id = metadata.get("message_id") or body.get("id")
         index = next(
@@ -409,31 +480,13 @@ class Filter:
         started = metadata.get(_STARTED) or _ns(message.get("timestamp")) or ended
         started = min(started, ended)
         history = messages[: index + 1]
-        anchor_time = next(
-            (ts for m in history if (ts := _ns(m.get("timestamp"))) is not None), started
-        )
-        # Conversation lifetimes are open-ended. Export a zero-duration anchor,
-        # not an unfinished root or an invented conversation duration. Re-emitting
-        # its stable ID is safe: Phoenix ignores spans it has already ingested.
-        anchor_time = min(anchor_time, started)
-        root = self._span(
-            "open-webui.conversation",
-            scope,
-            ("conversation",),
-            context=Context(),
-            start_time=anchor_time,
-            attributes={
-                **common,
-                SA.OPENINFERENCE_SPAN_KIND: Kind.CHAIN.value,
-                "openwebui.conversation.anchor": True,
-            },
-        )
-        root.end(end_time=anchor_time)
         span = self._span(
             "open-webui.chat",
             scope,
             ("message", message_id),
-            context=trace.set_span_in_context(root, Context()),
+            # Racine de sa propre trace : Phoenix affiche une session comme la suite des
+            # input/output des spans racines de ses traces (une trace = un tour).
+            context=Context(),
             start_time=started,
             attributes={
                 **common,
@@ -447,18 +500,21 @@ class Filter:
                     ),
                     "",
                 ),
-                SA.OUTPUT_VALUE: _text(message.get("content", "")),
+                SA.OUTPUT_VALUE: _text(_answer(message)),
                 "openwebui.message.id": str(message_id),
             },
         )
         try:
-            failed = self._trace_tools(span, message, scope, common, ended)
+            windows = _tool_windows(metadata.get(_CALLS) or [])
+            failed = self._trace_tools(span, message, scope, common, ended, windows)
             failed |= self._trace_llms(span, message, metadata, scope, common, ended)
             span.set_status(trace.Status(trace.StatusCode.ERROR if failed else trace.StatusCode.OK))
         finally:
             span.end(end_time=ended)
 
-    def _trace_tools(self, parent, message: dict, scope: tuple, common: dict, ended: int) -> bool:
+    def _trace_tools(
+        self, parent, message: dict, scope: tuple, common: dict, ended: int, windows: tuple
+    ) -> bool:
         # outlet receives saved Responses-style output, even for Ollama models.
         output = message.get("output") or []
         results = {
@@ -468,6 +524,7 @@ class Filter:
         }
         seen = set()
         failed = False
+        by_id, ordered = windows
         for index, call in enumerate(output):
             if call.get("type") != "function_call":
                 continue
@@ -483,7 +540,15 @@ class Filter:
             start = _ns(call.get("started_at"))
             end = _ns(call.get("ended_at"))
             timed = start is not None and end is not None and end >= start
-            if not timed:
+            source = "output" if timed else "none"
+            window = by_id.get(call_id) or (
+                ordered[len(seen) - 1] if len(seen) <= len(ordered) else None
+            )
+            if not timed and window:
+                # Entre l'appel LLM qui l'a demande et le suivant : place dans la sequence,
+                # duree majoree (elle inclut le traitement Open WebUI autour de l'outil).
+                (start, end), source = window, "llm_calls"
+            elif not timed:
                 # Missing execution times do not justify inventing a duration.
                 start = end = start or end or ended
             attributes = {
@@ -494,6 +559,7 @@ class Filter:
                 "openwebui.tool.call_id": str(call_id),
                 "openwebui.tool.status": status,
                 "openwebui.tool.timing_available": timed,
+                "openwebui.tool.timing_source": source,
             }
             if result:
                 attributes[SA.OUTPUT_VALUE] = _text(result.get("output", ""))
@@ -536,10 +602,7 @@ class Filter:
                 # Non-streamed replies have no stream hook. The completed outlet
                 # provides the response, but its time includes post-processing.
                 output = _responses_messages(message.get("output") or []) or [
-                    {
-                        "role": "assistant",
-                        "content": message.get("content", ""),
-                    }
+                    {"role": "assistant", "content": _answer(message)}
                 ]
                 end, completed = ended, True
                 usage = (message.get("usage") or {}) if len(calls) == 1 else {}
@@ -570,7 +633,7 @@ class Filter:
                     SA.OUTPUT_MIME_TYPE: "application/json",
                     "openwebui.llm.sequence": count,
                     "openwebui.llm.completed": completed,
-                    "openwebui.llm.input_source": "request_filter",
+                    "openwebui.llm.input_source": call.get("input_source", "request_filter"),
                     "openwebui.llm.output_source": "stream_filter" if observed else "outlet",
                     "openwebui.llm.structured_attributes_truncated": len(attributes) + 20 > 4096,
                     "openwebui.message.id": str(
@@ -582,7 +645,8 @@ class Filter:
                 attributes[SA.LLM_FINISH_REASON] = ",".join(reasons)
             # OpenInference n'a pas de convention de TTFT : attribut maison.
             # Seul le streaming en fournit un ; sans lui, ne rien inventer.
-            if call.get("first_token"):
+            # Sans hook `request` (< 0.12), le debut de l'appel n'est pas observable.
+            if call.get("first_token") and not call.get("legacy"):
                 attributes["openwebui.llm.time_to_first_token_ms"] = (
                     call["first_token"] - call["started"]
                 ) / 1_000_000

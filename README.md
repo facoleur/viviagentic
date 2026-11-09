@@ -16,14 +16,36 @@ make configure                         # applique vivia.toml a Open WebUI
 ## Configuration
 
 Tout passe par `vivia.toml` : admin, utilisateurs, groupes, permissions par defaut,
-modele par defaut, tool servers MCP, filter functions. `make configure` est idempotent,
+modele par defaut, tool servers MCP, skills, functions. `make configure` est idempotent,
 rejouable a volonte, et ne demande jamais de passer par l'UI.
 
 Chaque table `[api."<chemin>"]` est POSTee telle quelle sur `/api/v1/<chemin>` : ajouter ou
 retirer un reglage ne demande aucune modification de code, et n'importe quel endpoint de
-configuration est atteignable. Seules `[[groups]]` et `[[functions]]` ont un schema fixe.
+configuration est atteignable. Seules `[[groups]]`, `[[skills]]`, `[[models]]` et `[[functions]]`
+ont un schema fixe, chacune traitee par un module de `src/vivia/configure/`.
 Les noms de cles sont documentes dans
 <https://docs.openwebui.com/getting-started/env-configuration/>.
+
+Avec `only_declared_models = true` (section `[openwebui]`), seuls les modeles declares
+dans `[[models]]` (ici `qwen3:8b`) restent proposes : tout autre modele liste par Open WebUI
+(Ollama dont `nomic-embed-text`, connexions, modeles du workspace) recoit une entree
+`is_active = false`, qui le retire de la liste pour tous les comptes. Un modele tire plus tard
+dans Ollama est desactive au `make configure` suivant. Le modele d'arene est coupe par
+`[api."evaluations/config"]`. Desactiver `nomic-embed-text` ici ne touche pas aux embeddings
+RAG, qui l'appellent directement.
+
+### Skills
+
+`[[skills]]` pointe un dossier : chaque `.md` (`SKILL.md`, `references/*.md`) devient un skill
+Open WebUI nomme par son frontmatter (`name`, `description`), car Open WebUI 0.10 ne gere
+qu'un contenu par skill. Les ids listes dans `meta.skillIds` d'un modele lui sont attaches :
+le modele recoit leur liste (id + description) et charge le contenu dont il a besoin avec
+l'outil integre `view_skill`, ce qui demande `function_calling = "native"`.
+
+`openwebui/skills/oracle-elt/` aide a ecrire du SQL et du PL/SQL Oracle (26ai) qui compile :
+regles et pieges du dialecte dans `SKILL.md`, puis erreurs ORA, syntaxe 23ai/26ai, patterns
+de chargement ELT, performance, PL/SQL et dictionnaire en skills separes. Synthese filtree de
+<https://github.com/oracle/skills> (licence UPL 1.0), completee sur ce que ce depot couvre peu.
 
 Les generations auxiliaires (titre de conversation, tags, questions de suivi, autocompletion,
 reformulation de requete) sont desactivees via `[api."tasks/config/update"]` : le modele ne
@@ -37,7 +59,7 @@ L'image embarque le code : apres modification, `docker compose build mcp` puis `
 
 ### Tools qui rendent une vue
 
-`chart`, `graph` et `table` sont des MCP Apps : ils affichent une vue dans la conversation
+`chart`, `graph`, `sql_lineage` et `table` sont des MCP Apps : ils affichent une vue dans la conversation
 au lieu de renvoyer du texte. Le tool porte un `resourceUri` en `ui://`, le serveur sert le
 HTML correspondant en `text/html;profile=mcp-app`, et Open WebUI l'affiche dans une iframe
 sandboxee, sous le message. Les documents sont dans `src/vivia/ui.py`.
@@ -62,25 +84,29 @@ cette notification, jamais a `load`.
 ## Telemetrie
 
 La filter function `openwebui/functions/phoenix_tracing.py` (installee par `make configure`)
-emet une trace par conversation, un span CHAIN par tour de chat, puis des spans enfants
-LLM pour chaque appel au modele et TOOL pour les executions d'outils, au format
+emet une trace par tour de chat, dont la racine est un span CHAIN (question et reponse),
+puis des spans enfants LLM pour chaque appel au modele et TOOL pour les executions d'outils, au format
 OpenInference, vers `http://phoenix:6006/v1/traces`.
 Traces visibles sur http://127.0.0.1:6006 (projet
 `open-webui`), sans authentification : `PHOENIX_ENABLE_AUTH=false`, sinon l'ingestion OTLP
 exigerait une cle d'API.
 
-Les identifiants derives du projet, de l'utilisateur et du `chat_id` conservent la meme
-trace apres un rechargement du filtre. Le span racine `open-webui.conversation` est un
-point de rattachement de duree nulle : Open WebUI ne fournit pas d'evenement de fermeture
-definitive d'un chat. Les spans des tours et des outils portent leurs propres durees.
-Phoenix ignore les spans deja recus avec le meme identifiant, y compris la racine
-reenvoyee a chaque tour. `session.id` reste egal au `chat_id` ; le `session_id` WebUI
-(connexion navigateur) n'est jamais utilise pour regrouper les conversations.
+Les traces d'un meme chat portent `session.id` = `chat_id` : l'onglet Sessions de Phoenix
+affiche la conversation comme la suite des input/output des spans racines de ses traces,
+d'ou une trace par tour (avec un span racine commun a toute la conversation, la session ne
+montrerait qu'une entree vide). Le `session_id` WebUI (connexion navigateur) n'est jamais
+utilise pour regrouper les conversations. Les identifiants, derives du projet, de
+l'utilisateur, du `chat_id` et du `message_id`, restent les memes apres un rechargement du
+filtre : Phoenix ignore un tour deja recu.
 
-Compatible avec le format `output` d'Open WebUI 0.13 : seuls les `function_call` du
+Compatible avec le format `output` d'Open WebUI 0.10 a 0.13 : seuls les `function_call` du
 message courant sont traces, avec leur `function_call_output` associe par `call_id`,
-leurs arguments, leur statut et leurs horaires d'execution. Sans horaires disponibles,
-le span outil a une duree nulle et `openwebui.tool.timing_available=false`.
+leurs arguments, leur statut et leurs horaires d'execution. Open WebUI < 0.13 ne date pas
+les appels d'outils : le span outil est alors place entre la fin de l'appel LLM qui l'a
+demande et le debut du suivant (`openwebui.tool.timing_source=llm_calls`,
+`openwebui.tool.timing_available=false`), ce qui garde l'ordre LLM -> outil -> LLM ; sa duree
+est majoree (elle inclut le traitement d'Open WebUI). Sans aucun repere, il a une duree nulle
+a la fin du tour (`timing_source=none`).
 
 `request` photographie le contexte et les schemas d'outils avant chaque appel au modele.
 `stream` reassemble sa reponse (texte, raisonnement expose, appels d'outils), sa raison
@@ -98,6 +124,18 @@ l'appel final observable est renseigne depuis `outlet` ; sa duree inclut le post
 Sans hooks de capture (ancien historique ou appel `/api/chat/completed` seul), aucun
 appel LLM intermediaire n'est invente. Un tour abandonne avant `outlet` n'est pas exporte.
 
+Open WebUI 0.10 et 0.11 n'ont pas de hook `request` (il apparait en 0.12). Le filtre le
+detecte (aucun appel a `request` pendant le tour) et se replie sur `inlet` et `stream` :
+chaque nouvelle reponse du fournisseur ouvre un span LLM, qui commence a son premier
+evenement recu. Le premier appel reprend l'entree vue par `inlet`
+(`openwebui.llm.input_source=inlet_filter`, avant ajout des outils et du system prompt) ;
+les suivants, apres execution des outils, n'ont pas d'entree
+(`input_source=unavailable`). Sans streaming, l'appel unique est reconstruit depuis `inlet`
+et `outlet`. Tours, outils, sorties, raisons de fin et compteurs de tokens sont identiques.
+Ces versions n'enregistrent cote serveur que l'`output` du message assistant : `outlet` le
+recoit avec un `content` vide, la reponse du tour est donc reprise des items `message` de
+`output`, comme le fait Open WebUI 0.13.
+
 Les spans sont emis dans `outlet`. `inlet` conserve le debut du tour dans le dictionnaire
 `__metadata__` partage par les hooks inline ; a defaut, le timestamp du message est utilise.
 Sans `chat_id`, chaque reponse obtient sa propre trace. Les anciennes traces ne sont pas
@@ -105,12 +143,20 @@ migrees : le regroupement s'applique aux tours emis avec cette version du filtre
 
 ### Votes utilisateur
 
-`make annotate` (`src/vivia/annotate.py`) reporte les votes 👍/👎 d'Open WebUI en annotations
-Phoenix, sur le span du tour note. Le filtre derivant ses identifiants par hachage de
-(projet, utilisateur, `chat_id`, `message_id`), le script rejoue ce calcul depuis l'exterieur :
-un vote laisse apres coup retrouve son span sans qu'aucun etat n'ait ete conserve.
-`identifier` vaut l'id du feedback, donc relancer la commande met a jour au lieu d'empiler.
-`tests/test_annotate.py` echoue si le filtre et le script divergent sur ce calcul.
+Chaque vote 👍/👎 devient une annotation Phoenix `user_rating` sur le span du tour note
+(`up`/`down`, score 1/0, commentaire en explication), des qu'il est donne : la fonction
+d'evenement `openwebui/functions/phoenix_feedback.py` (installee par `make configure`,
+Open WebUI 0.10+) recoit `feedback.created` et `feedback.updated`, relit le vote et l'envoie
+a Phoenix. Le filtre derivant ses identifiants par hachage de (projet, utilisateur,
+`chat_id`, `message_id`), la fonction rejoue ce calcul sans etat partage ;
+`tests/test_annotate.py` echoue si les deux divergent, et `project_name` doit etre le meme
+dans les valves des deux fonctions. Un vote donne avant que le tour soit exporte est
+renvoye toutes les 5 s (6 essais). `identifier` vaut l'id du feedback : changer son vote ou
+ajouter un commentaire met a jour l'annotation au lieu d'en empiler une.
+
+`make annotate` (`src/vivia/annotate.py`) rattrape les votes existants (anterieurs a la
+fonction, ou donnes pendant un arret de Phoenix) avec la meme logique, lue dans le meme
+fichier. Un vote dont le tour n'a jamais ete trace est signale comme introuvable.
 
 ### Latence
 
@@ -118,7 +164,44 @@ Les spans LLM portent `openwebui.llm.time_to_first_token_ms`, mesure du hook `re
 premier fragment reellement emis par le modele — texte, raisonnement ou arguments d'outil.
 Les evenements de role, d'usage ou d'ouverture d'item n'en sont pas un. OpenInference n'ayant
 pas de convention de TTFT, l'attribut reste dans le namespace `openwebui`. Sans streaming,
-il est absent plutot qu'estime.
+ou avant Open WebUI 0.12 (pas de hook `request`, donc pas de debut d'appel), il est absent
+plutot qu'estime.
+
+## Lineage SQL
+
+`src/lineage/` extrait le lineage d'un script SQL Oracle avec [sqlglot](https://github.com/tobymao/sqlglot)
+(parseur pur Python, dialecte Oracle). Sont lus `INSERT`, `MERGE`, `UPDATE` et `CREATE ... AS` ;
+les CTE et sous-requetes sont traversees.
+
+Un script qui ne contient qu'un `SELECT`, ecrit en table par l'outil ETL, est lu comme
+`CREATE TABLE <cible> AS SELECT ...` : la cible est `-t/--target` (`target=` en Python), par
+defaut le nom du fichier sans extension. Sans cible, un `SELECT` seul ne produit rien.
+
+```sh
+uv run vivia-lineage script.sql                    # niveau table : "SOURCE -> CIBLE"
+uv run vivia-lineage script.sql -c                 # niveau colonne : "T.COL -> T.COL"
+uv run vivia-lineage script.sql -c --md out.md     # + graphe Mermaid en Markdown
+uv run vivia-lineage extract.sql -t '#SCH#.DST'    # SELECT seul ecrit dans #SCH#.DST
+```
+
+En Python, `lineage(sql, columns=False, schema=None, target=None)` renvoie `[{"source": ..., "target": ...}]`,
+directement utilisable par le tool `graph`, et `to_mermaid(edges, columns)` le bloc Markdown correspondant.
+
+- **Colonnes** : `sqlglot.lineage` remonte chaque colonne cible jusqu'aux colonnes des tables
+  sources, a travers expressions, CTE, sous-requetes et `UNION` (correspondance par position avec
+  la liste de colonnes de l'`INSERT`). Les constantes ne produisent pas d'arete. Sans schema, un
+  `SELECT *` donne une colonne `*` ; `schema` (format sqlglot `{schema: {table: {col: type}}}`,
+  templates ecrits `TPL#NOM#`) permet de le developper.
+- **Templates** : `#NOM#` est masque en `TPL#NOM#` avant le parsing (Oracle accepte `#` dans un
+  identifiant, sauf en tete) puis restitue : `#SCH#_STG.ORDERS` reste tel quel dans le graphe.
+  Un template seul en position de colonne (`SELECT sysdate, #pndate#, ...`) est traite comme une
+  valeur : il ne cree pas d'arete. Un template doit tenir dans un identifiant ou une valeur, pas
+  remplacer un bout de requete (`#WHERE_CLAUSE#`).
+- **Agent** : le tool MCP `sql_lineage(sql, columns, target)` affiche le graphe dans la conversation
+  Open WebUI, avec la vue de `graph` (aucune ressource externe) ; en mode colonne, une couleur par
+  table. Les aretes restent dans le resultat, lisibles par le modele.
+- **Markdown** : `--md` ecrit un bloc ` ```mermaid ` (flowchart gauche-droite, une boite par table en
+  mode colonne), rendu nativement par Open WebUI, GitHub ou VS Code, sans rien charger du web.
 
 ## Tests
 

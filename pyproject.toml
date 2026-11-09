@@ -3,12 +3,17 @@ name = "vivia"
 version = "0.1.0"
 description = "Local LLM stack: Ollama + Open WebUI + FastMCP + Phoenix"
 requires-python = ">=3.12"
-dependencies = ["fastmcp>=4.1", "tzdata>=2025.1"]
+dependencies = [
+    "fastmcp>=4.1",
+    "sqlglot>=30.29.0",
+    "tzdata>=2025.1",
+]
 
 [project.scripts]
 vivia-mcp = "vivia.mcp:main"
 vivia-configure = "vivia.configure:main"
 vivia-annotate = "vivia.annotate:main"
+vivia-lineage = "lineage:main"
 
 [dependency-groups]
 ops = ["httpx>=0.28"]
@@ -18,6 +23,9 @@ dev = [
     "pytest>=8",
     "ruff>=0.14",
 ]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vivia", "src/lineage"]
 
 [build-system]
 requires = ["hatchling"]

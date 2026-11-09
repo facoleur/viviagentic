@@ -52,7 +52,7 @@ def body(message_id="a1", chat_id="chat1", output=None):
     }
 
 
-class TracingTests(unittest.IsolatedAsyncioTestCase):
+class Harness(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.exporter = InMemorySpanExporter()
         self.providers = []
@@ -80,19 +80,34 @@ class TracingTests(unittest.IsolatedAsyncioTestCase):
                 payload, metadata, self.user if user is None else user
             )
 
-    async def test_two_turns_and_reload_share_one_root_and_trace(self):
+    async def request_at(self, payload, metadata, at, filter_=None):
+        with patch.object(tracing.time, "time_ns", return_value=int(at * 1e9)):
+            returned = await (filter_ or self.filter).request(payload, metadata)
+        self.assertIs(returned, payload)
+
+    async def stream_at(self, event, metadata, at, filter_=None):
+        before = copy.deepcopy(event)
+        with patch.object(tracing.time, "time_ns", return_value=int(at * 1e9)):
+            returned = await (filter_ or self.filter).stream(event, metadata)
+        self.assertIs(returned, event)
+        self.assertEqual(event, before)
+
+
+class TracingTests(Harness):
+    async def test_each_turn_is_a_root_trace_of_the_chat_session(self):
+        # Phoenix affiche une session comme la suite des input/output des racines de ses
+        # traces : chaque tour doit etre une trace dont la racine porte question et reponse.
         await self.emit(body())
         await self.emit(body("a2", output=tool()), filter_=self.new_filter())
-        roots = self.spans("open-webui.conversation")
         turns = self.spans("open-webui.chat")
         tools = self.spans("tool.vivia_roll_dice")
-        self.assertEqual(len({s.context.trace_id for s in self.spans()}), 1)
-        self.assertEqual(roots[0].context.span_id, roots[1].context.span_id)
-        self.assertNotEqual(turns[0].context.span_id, turns[1].context.span_id)
-        self.assertTrue(all(s.parent.span_id == roots[0].context.span_id for s in turns))
+        self.assertEqual(len(self.spans("open-webui.conversation")), 0)
+        self.assertTrue(all(s.parent is None for s in turns))
+        self.assertNotEqual(turns[0].context.trace_id, turns[1].context.trace_id)
         self.assertEqual(tools[0].parent.span_id, turns[1].context.span_id)
-        self.assertTrue(all(s.parent is None for s in roots))
-        self.assertEqual(roots[0].start_time, roots[0].end_time)
+        self.assertEqual(tools[0].context.trace_id, turns[1].context.trace_id)
+        self.assertEqual(turns[0].attributes["input.value"], "Lance quatre dés.")
+        self.assertEqual(turns[0].attributes["output.value"], "Total : 29.")
         self.assertTrue(all(s.attributes["session.id"] == "chat1" for s in self.spans()))
 
     async def test_only_current_message_tools_are_paired_by_call_id(self):
@@ -136,7 +151,7 @@ class TracingTests(unittest.IsolatedAsyncioTestCase):
         await self.emit(body(), filter_=other)
         for _ in range(2):
             await self.emit(body(chat_id=""), {"session_id": "same-browser-socket"})
-        roots = self.spans("open-webui.conversation")
+        roots = self.spans("open-webui.chat")
         self.assertEqual(len({s.context.trace_id for s in roots}), 6)
         self.assertTrue(all("session.id" not in s.attributes for s in roots[-2:]))
 
@@ -200,7 +215,7 @@ class TracingTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(trace.get_current_span(), ambient)
             self.assertNotEqual(
                 ambient.get_span_context().trace_id,
-                self.spans("open-webui.conversation")[0].context.trace_id,
+                self.spans("open-webui.chat")[0].context.trace_id,
             )
         self.assertIsNone(tracing._SPAN_IDS.get())
 
@@ -211,18 +226,6 @@ class TracingTests(unittest.IsolatedAsyncioTestCase):
             self.assertLogs(tracing.log, level="ERROR"),
         ):
             self.assertIs(await self.emit(payload), payload)
-
-    async def request_at(self, payload, metadata, at, filter_=None):
-        with patch.object(tracing.time, "time_ns", return_value=int(at * 1e9)):
-            returned = await (filter_ or self.filter).request(payload, metadata)
-        self.assertIs(returned, payload)
-
-    async def stream_at(self, event, metadata, at, filter_=None):
-        before = copy.deepcopy(event)
-        with patch.object(tracing.time, "time_ns", return_value=int(at * 1e9)):
-            returned = await (filter_ or self.filter).stream(event, metadata)
-        self.assertIs(returned, event)
-        self.assertEqual(event, before)
 
     async def test_llm_tool_llm_sequence_with_reasoning_and_separate_contexts(self):
         metadata = {"chat_id": "chat1", "message_id": "a1"}
@@ -336,7 +339,8 @@ class TracingTests(unittest.IsolatedAsyncioTestCase):
         first, second = self.spans("llm.call.1")[0], self.spans("llm.call.2")[0]
         turn = self.spans("open-webui.chat")[0]
         tool_span = self.spans("tool.vivia_roll_dice")[0]
-        self.assertEqual(len(self.spans()), 5)
+        self.assertEqual(len(self.spans()), 4)
+        self.assertIsNone(turn.parent)
         self.assertEqual({s.context.trace_id for s in self.spans()}, {turn.context.trace_id})
         self.assertTrue(
             all(s.parent.span_id == turn.context.span_id for s in [first, tool_span, second])
@@ -642,3 +646,134 @@ class TracingTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LegacyOpenWebUITests(Harness):
+    """Open WebUI 0.10 / 0.11 : inlet, stream et outlet, mais pas de hook `request`."""
+
+    async def inlet_at(self, payload, metadata, at):
+        with patch.object(tracing.time, "time_ns", return_value=int(at * 1e9)):
+            self.assertIs(await self.filter.inlet(payload, metadata), payload)
+
+    async def test_streamed_llm_tool_llm_without_request_hook(self):
+        metadata = {"chat_id": "chat1", "message_id": "a1"}
+        user = {"role": "user", "content": "Lance quatre dés."}
+        payload = {
+            "model": "qwen3:8b",
+            "stream": True,
+            "temperature": 0.2,
+            "messages": [user],
+            "tools": [{"type": "function", "function": {"name": "vivia_roll_dice"}}],
+        }
+        await self.inlet_at(payload, metadata, 100)
+        payload["messages"].append({"role": "system", "content": "mutation ulterieure"})
+        call = {"index": 0, "id": "c1", "function": {"name": "vivia_roll_dice", "arguments": "{}"}}
+        await self.stream_at({"choices": [{"delta": {"role": "assistant"}}]}, metadata, 102)
+        await self.stream_at(
+            {"choices": [{"delta": {"tool_calls": [call]}, "finish_reason": "tool_calls"}]},
+            metadata,
+            103,
+        )
+        # Un usage apres la fin de reponse n'ouvre pas un nouvel appel.
+        await self.stream_at({"choices": [], "usage": {"total_tokens": 9}}, metadata, 104)
+        await self.stream_at({"choices": [{"delta": {"content": "Total"}}]}, metadata, 106)
+        await self.stream_at(
+            {"choices": [{"delta": {"content": " : 29."}, "finish_reason": "stop"}]}, metadata, 107
+        )
+        await self.emit(body(output=tool()), metadata)
+
+        first, second = self.spans("llm.call.1")[0], self.spans("llm.call.2")[0]
+        self.assertEqual(len(self.spans("llm.call.3")), 0)
+        self.assertEqual(first.attributes["openwebui.llm.input_source"], "inlet_filter")
+        self.assertEqual(first.attributes["llm.input_messages.0.message.content"], user["content"])
+        self.assertNotIn("llm.input_messages.1.message.role", first.attributes)
+        self.assertIn("llm.tools.0.tool.json_schema", first.attributes)
+        self.assertEqual(first.attributes["llm.invocation_parameters"], '{"temperature": 0.2}')
+        self.assertEqual(first.attributes["llm.token_count.total"], 9)
+        self.assertEqual((first.start_time, first.end_time), (102_000_000_000, 103_000_000_000))
+        self.assertEqual(second.attributes["openwebui.llm.input_source"], "unavailable")
+        self.assertEqual(second.attributes["llm.output_messages.0.message.content"], "Total : 29.")
+        self.assertEqual((second.start_time, second.end_time), (106_000_000_000, 107_000_000_000))
+        # Le debut d'appel n'est pas observable sans hook `request` : pas de TTFT invente.
+        self.assertNotIn("openwebui.llm.time_to_first_token_ms", first.attributes)
+        self.assertEqual(self.spans("open-webui.chat")[0].start_time, 100_000_000_000)
+        self.assertEqual(len(self.spans("tool.vivia_roll_dice")), 1)
+
+    async def test_responses_events_open_one_call_per_response(self):
+        metadata = {}
+        await self.inlet_at({"model": "m", "stream": True, "messages": []}, metadata, 100)
+        for at in (101, 105):
+            await self.stream_at({"type": "response.created", "response": {}}, metadata, at)
+            await self.stream_at(
+                {"type": "response.completed", "response": {"output": []}}, metadata, at + 1
+            )
+        await self.emit(body(), metadata)
+        starts = [s.start_time for s in self.spans() if s.name.startswith("llm.call.")]
+        self.assertEqual(sorted(starts), [101_000_000_000, 105_000_000_000])
+
+    async def test_non_streamed_call_without_request_hook_uses_inlet_and_outlet(self):
+        metadata = {}
+        await self.inlet_at({"model": "m", "stream": False, "messages": []}, metadata, 100)
+        await self.emit(body(), metadata)
+        span = self.spans("llm.call.1")[0]
+        self.assertEqual(span.attributes["openwebui.llm.input_source"], "inlet_filter")
+        self.assertEqual(span.attributes["openwebui.llm.output_source"], "outlet")
+        self.assertEqual(span.attributes["llm.output_messages.0.message.content"], "Total : 29.")
+
+    async def test_request_hook_takes_over_when_present(self):
+        metadata = {}
+        payload = {"model": "m", "stream": True, "messages": []}
+        await self.inlet_at(payload, metadata, 100)
+        await self.request_at(payload, metadata, 101)
+        await self.stream_at(
+            {"choices": [{"delta": {"content": "x"}, "finish_reason": "stop"}]}, metadata, 103
+        )
+        await self.emit(body(), metadata)
+        span = self.spans("llm.call.1")[0]
+        self.assertEqual(len(self.spans("llm.call.2")), 0)
+        self.assertEqual(span.attributes["openwebui.llm.input_source"], "request_filter")
+        self.assertEqual(span.attributes["openwebui.llm.time_to_first_token_ms"], 2000)
+
+    async def test_answer_falls_back_to_output_when_content_is_empty(self):
+        # Open WebUI 0.10 / 0.11 n'enregistrent que `output` : outlet recoit content="".
+        payload = body(output=[*tool(), {"type": "reasoning", "content": [{"text": "Hmm."}]}])
+        payload["messages"][-1]["content"] = ""
+        payload["messages"][-1]["output"].append(
+            {"type": "message", "content": [{"type": "output_text", "text": "Total : 29."}]}
+        )
+        await self.emit(payload)
+        self.assertEqual(self.spans("open-webui.chat")[0].attributes["output.value"], "Total : 29.")
+
+    async def test_untimed_tools_sit_between_the_llm_calls_around_them(self):
+        # Open WebUI 0.10 ne date pas les function_call : l'outil est place apres l'appel LLM
+        # qui l'a demande et avant le suivant, pas a la fin du tour.
+        for call_id in ("c1", "id-differente"):
+            with self.subTest(call_id=call_id):
+                self.exporter.clear()
+                metadata = {"chat_id": f"chat-{call_id}", "message_id": "a1"}
+                await self.inlet_at({"model": "m", "stream": True, "messages": []}, metadata, 100)
+                tc = {"index": 0, "id": "c1", "function": {"name": "vivia_roll_dice"}}
+                await self.stream_at(
+                    {"choices": [{"delta": {"tool_calls": [tc]}, "finish_reason": "tool_calls"}]},
+                    metadata,
+                    103,
+                )
+                await self.stream_at(
+                    {"choices": [{"delta": {"content": "29"}, "finish_reason": "stop"}]},
+                    metadata,
+                    106,
+                )
+                output = tool(call_id)
+                for item in output:
+                    item.pop("started_at", None)
+                    item.pop("ended_at", None)
+                await self.emit(body(output=output), metadata)
+                span = self.spans("tool.vivia_roll_dice")[0]
+                self.assertEqual((span.start_time, span.end_time), (103e9, 106e9))
+                self.assertEqual(span.attributes["openwebui.tool.timing_source"], "llm_calls")
+                self.assertFalse(span.attributes["openwebui.tool.timing_available"])
+                order = sorted(self.spans(), key=lambda s: (s.start_time, s.name))
+                self.assertEqual(
+                    [s.name for s in order if s.name != "open-webui.chat"],
+                    ["llm.call.1", "tool.vivia_roll_dice", "llm.call.2"],
+                )

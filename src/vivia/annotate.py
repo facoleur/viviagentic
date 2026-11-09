@@ -1,64 +1,30 @@
-"""Reporte les votes 👍/👎 d'Open WebUI en annotations Phoenix, sur le bon span.
+"""Rattrapage des votes 👍/👎 d'Open WebUI en annotations Phoenix, sur le bon span.
 
-Le filtre `phoenix_tracing.py` derive ses identifiants de span par hachage, sans
-etat partage : le meme quadruplet (projet, utilisateur, chat, message) redonne
-toujours le meme span. Ce script rejoue ce calcul depuis l'exterieur, ce qui
-permet d'attacher un vote a son tour de conversation sans avoir trace quoi que
-ce soit sur le moment. `identifier` rend l'envoi idempotent : Phoenix met a jour
-l'annotation existante au lieu d'en empiler une copie a chaque passage.
+En temps reel, la fonction d'evenement `phoenix_feedback` le fait a chaque vote. Ce
+script rejoue tous les votes existants (anterieurs a la fonction, ou perdus si Phoenix
+etait arrete) avec la meme logique, lue dans le meme fichier. Le filtre
+`phoenix_tracing.py` derive ses identifiants de span par hachage, sans etat partage :
+le meme quadruplet (projet, utilisateur, chat, message) redonne toujours le meme span.
+`identifier` rend l'envoi idempotent : Phoenix met a jour l'annotation existante.
 """
 
-import hashlib
-import json
+import importlib.util
 import sys
 import tomllib
 from pathlib import Path
-from typing import Any
-
-import httpx
 
 from vivia.configure import ROOT, OpenWebUI
 
-# Doit rester identique au `scope` du filtre : c'est le seul couplage entre les
-# deux, et `tests/test_annotate.py` echoue si l'un des deux change seul.
-NAMESPACE = "vivia.phoenix.v1"
-ANNOTATION_NAME = "user_rating"
-
-
-def span_id(project: str, user_id: str, chat_id: str, message_id: str) -> str:
-    """Reproduit `_id(*scope, "message", message_id, size=8)` du filtre."""
-    parts = (NAMESPACE, project, user_id, chat_id, "message", message_id)
-    digest = hashlib.blake2b(
-        json.dumps(parts, ensure_ascii=False, default=str).encode(), digest_size=8
-    ).digest()
-    return f"{int.from_bytes(digest, 'big') or 1:016x}"
-
-
-def annotation(feedback: dict, project: str) -> dict[str, Any] | None:
-    """Traduit un feedback en annotation, ou None s'il n'est pas rattachable."""
-    data = feedback.get("data") or {}
-    meta = feedback.get("meta") or {}
-    chat_id, message_id = meta.get("chat_id"), meta.get("message_id")
-    rating = str(data.get("rating", ""))
-    # Open WebUI stocke aussi des feedbacks d'arene et des brouillons sans vote :
-    # sans les trois identifiants et une note, il n'y a pas de span a annoter.
-    if not (chat_id and message_id and feedback.get("user_id")) or rating not in ("1", "-1"):
-        return None
-    extra = {key: data[key] for key in ("comment", "reason", "model_id", "tags") if data.get(key)}
-    return {
-        "span_id": span_id(project, feedback["user_id"], chat_id, message_id),
-        "name": ANNOTATION_NAME,
-        "annotator_kind": "HUMAN",
-        # Le score binaire rend la note moyennable dans Phoenix ; le label reste
-        # lisible tel quel dans l'UI.
-        "result": {
-            "label": "up" if rating == "1" else "down",
-            "score": 1.0 if rating == "1" else 0.0,
-            "explanation": data.get("comment") or data.get("reason") or None,
-        },
-        "metadata": {"chat_id": chat_id, "message_id": message_id, **extra},
-        "identifier": str(feedback["id"]),
-    }
+# La fonction tourne dans Open WebUI, hors de ce package : on charge son fichier pour
+# n'avoir qu'une seule definition du calcul de span et du format d'annotation.
+_spec = importlib.util.spec_from_file_location(
+    "phoenix_feedback", ROOT / "openwebui" / "functions" / "phoenix_feedback.py"
+)
+feedback_function = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(feedback_function)
+NAMESPACE = feedback_function.NAMESPACE
+span_id = feedback_function.span_id
+annotation = feedback_function.annotation
 
 
 def main() -> None:
@@ -86,16 +52,19 @@ def main() -> None:
         print("done")
         return
 
-    res = httpx.post(f"{phoenix}/v1/span_annotations", json={"data": payload}, timeout=30)
-    if res.is_success:
-        for item in payload:
-            print(f"  {item['result']['label']:>4} -> span {item['span_id']}")
-        print(f"done ({len(payload)} annotation(s))")
-    else:
-        # Un span absent de Phoenix (trace purgee, filtre inactif a l'epoque)
-        # fait echouer le lot entier : le signaler plutot que de le masquer.
-        print(f"  ! POST /v1/span_annotations -> {res.status_code} {res.text[:300]}")
-        raise SystemExit(1)
+    missing = 0
+    for item in payload:
+        status = feedback_function.post(phoenix, item)
+        label = f"{item['result']['label']:>4} -> span {item['span_id']}"
+        if status == 404:
+            missing += 1
+            print(f"  {label} : absent de Phoenix, ignore")
+        elif 200 <= status < 300:
+            print(f"  {label}")
+        else:
+            print(f"  ! POST /v1/span_annotations -> HTTP {status}")
+            raise SystemExit(1)
+    print(f"done ({len(payload) - missing} annotation(s), {missing} span(s) introuvable(s))")
 
 
 if __name__ == "__main__":

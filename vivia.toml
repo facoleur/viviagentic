@@ -10,6 +10,9 @@
 
 [openwebui]
 url = "http://localhost:3000"
+# Seuls les modeles declares dans [[models]] restent visibles : tous les autres
+# (Ollama, connexions, modeles du workspace) sont desactives a chaque `make configure`.
+only_declared_models = true
 
 # Vu depuis l'hote : les valves du filtre, elles, adressent le reseau Docker.
 [phoenix]
@@ -53,6 +56,10 @@ features = { web_search = false, image_generation = false, code_interpreter = fa
 [api."configs/models"]
 DEFAULT_MODELS = "qwen3:8b"
 
+# Pas de modele d'arene (comparaison a l'aveugle de deux modeles) : il s'ajouterait a la liste.
+[api."evaluations/config"]
+ENABLE_EVALUATION_ARENA_MODELS = false
+
 [api."configs/tool_servers"]
 TOOL_SERVER_CONNECTIONS = [
   { url = "http://mcp:8000/mcp", type = "mcp", auth_type = "none", key = "", path = "", info = { id = "vivia", name = "vivia", description = "Tools de test (now, calc, roll_dice, text_stats)" }, config = { enable = true } },
@@ -80,6 +87,14 @@ ENABLE_IMAGE_PROMPT_GENERATION = false
 IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE = ""
 TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE = ""
 
+# Skills : chaque .md du dossier (SKILL.md, references/*.md) devient un skill nomme par son
+# frontmatter. Open WebUI ne montre au modele que leur liste (id + description) et le modele
+# charge le contenu utile avec l'outil integre `view_skill` (function_calling "native" requis).
+# public = true : lisibles par tous les comptes, sinon seul l'admin y aurait acces.
+[[skills]]
+path = "openwebui/skills/oracle-elt"
+public = true
+
 # Entrees de modele : attache les tools au modele pour qu'ils soient toujours
 # disponibles, sans que l'utilisateur ait a les cocher dans le chat.
 # L'id d'un tool server est "server:<type>:<info.id>", d'ou "server:mcp:vivia".
@@ -89,7 +104,10 @@ TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE = ""
 id = "qwen3:8b"
 name = "qwen3:8b"
 is_active = true
-meta = { description = "Qwen3 8B + tools MCP vivia", toolIds = ["server:mcp:vivia"] }
+meta = { description = "Qwen3 8B + tools MCP vivia", toolIds = ["server:mcp:vivia"], skillIds = [
+  "oracle-elt", "oracle-elt-erreurs", "oracle-elt-syntaxe-26ai", "oracle-elt-patterns",
+  "oracle-elt-performance", "oracle-elt-plsql", "oracle-elt-dictionnaire",
+] }
 params = { function_calling = "native" }
 
 [[functions]]
@@ -100,4 +118,15 @@ path = "openwebui/functions/phoenix_tracing.py"
 description = "Trace les chats et tool calls vers Phoenix"
 active = true
 global = true
+valves = { endpoint = "http://phoenix:6006", project_name = "open-webui" }
+
+# Reporte chaque vote 👍/👎 sur le span du tour, des qu'il est donne. `project_name`
+# doit etre celui de phoenix_tracing : il entre dans le calcul de l'identifiant du span.
+[[functions]]
+id = "phoenix_feedback"
+name = "Phoenix Feedback"
+type = "event"
+path = "openwebui/functions/phoenix_feedback.py"
+description = "Annote dans Phoenix les tours notes 👍/👎"
+active = true
 valves = { endpoint = "http://phoenix:6006", project_name = "open-webui" }
