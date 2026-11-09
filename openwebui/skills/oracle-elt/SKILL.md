@@ -8,7 +8,12 @@ description: Écrire, corriger, optimiser et documenter le SQL et le PL/SQL d'un
 Contexte : data warehouse bancaire sur Oracle AI Database 26ai, ELT écrit en PL/SQL.
 Une application = une ou plusieurs chaînes → flux → opérations (un bloc SQL ou PL/SQL).
 Le code a 15 à 25 ans : du SQL propre côte à côte avec des opérations de 4 000 lignes.
-Couches du DWH :
+Schémas = zone + type, par exemple `DMDINT`, `SDETRG`, `SDASTG` :
+- type **INT** : uniquement des vues (interface de lecture de la zone) ;
+- type **TRG** : tables cibles, alimentées par les opérations ;
+- type **STG** : tables de staging (étapes intermédiaires).
+
+Zones du DWH :
 - **SDA** : données sources.
 - **SDE** : données transformées, prêtes à être réutilisées, dont les tables **P** (préparatoires,
   pérennes, avec tout l'historique : P tiers, P flux…). Réutiliser une table P existante plutôt
