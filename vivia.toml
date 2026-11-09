@@ -10,6 +10,9 @@
 
 [openwebui]
 url = "http://localhost:3000"
+# Seuls les modeles declares dans [[models]] restent visibles : tous les autres
+# (Ollama, connexions, modeles du workspace) sont desactives a chaque `make configure`.
+only_declared_models = true
 
 # Vu depuis l'hote : les valves du filtre, elles, adressent le reseau Docker.
 [phoenix]
@@ -52,6 +55,10 @@ features = { web_search = false, image_generation = false, code_interpreter = fa
 
 [api."configs/models"]
 DEFAULT_MODELS = "qwen3:8b"
+
+# Pas de modele d'arene (comparaison a l'aveugle de deux modeles) : il s'ajouterait a la liste.
+[api."evaluations/config"]
+ENABLE_EVALUATION_ARENA_MODELS = false
 
 [api."configs/tool_servers"]
 TOOL_SERVER_CONNECTIONS = [

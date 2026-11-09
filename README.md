@@ -25,6 +25,14 @@ configuration est atteignable. Seules `[[groups]]` et `[[functions]]` ont un sch
 Les noms de cles sont documentes dans
 <https://docs.openwebui.com/getting-started/env-configuration/>.
 
+Avec `only_declared_models = true` (section `[openwebui]`), seuls les modeles declares
+dans `[[models]]` (ici `qwen3:8b`) restent proposes : tout autre modele liste par Open WebUI
+(Ollama dont `nomic-embed-text`, connexions, modeles du workspace) recoit une entree
+`is_active = false`, qui le retire de la liste pour tous les comptes. Un modele tire plus tard
+dans Ollama est desactive au `make configure` suivant. Le modele d'arene est coupe par
+`[api."evaluations/config"]`. Desactiver `nomic-embed-text` ici ne touche pas aux embeddings
+RAG, qui l'appellent directement.
+
 Les generations auxiliaires (titre de conversation, tags, questions de suivi, autocompletion,
 reformulation de requete) sont desactivees via `[api."tasks/config/update"]` : le modele ne
 recoit que la question posee.
