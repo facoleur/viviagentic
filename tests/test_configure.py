@@ -1,5 +1,7 @@
-"""`make configure` : seuls les modeles declares restent actifs, sans appel reseau."""
+"""`make configure` sans appel reseau : modeles declares, skills."""
 
+import re
+import tomllib
 import unittest
 
 from vivia import configure
@@ -52,6 +54,39 @@ class OnlyDeclaredModelsTests(unittest.TestCase):
 
     def test_nothing_is_disabled_without_the_option(self):
         self.assertEqual(list(self.run_sync(False)), ["qwen3:8b"])
+
+
+class SkillsTests(unittest.TestCase):
+    def test_every_markdown_file_is_a_skill_attached_to_the_model(self):
+        cfg = tomllib.loads((configure.ROOT / "vivia.toml").read_text())
+        files = configure.skills.skill_files(configure.ROOT / cfg["skills"][0]["path"])
+        skills = [configure.skills.read_skill(f) for f in files]
+        ids = [s["id"] for s in skills]
+        self.assertEqual(ids[0], "oracle-elt")
+        for skill in skills:
+            self.assertTrue(skill["description"] and not skill["content"].startswith("---"))
+        self.assertEqual(sorted(ids), sorted(cfg["models"][0]["meta"]["skillIds"]))
+        # Chaque skill cite par un autre existe.
+        for skill in skills:
+            for cited in re.findall(r"`(oracle-elt[\w-]*)`", skill["content"]):
+                self.assertIn(cited, ids, f"{skill['id']} cite {cited}")
+
+    def test_sync_creates_then_updates_with_public_read(self):
+        class Api:
+            def __init__(self, known):
+                self.known, self.posts = known, []
+
+            def get(self, path):
+                return {} if path.rsplit("/", 1)[1] in self.known else None
+
+            def try_call(self, method, path, body):
+                self.posts.append((path, body))
+
+        api = Api({"oracle-elt"})
+        configure.sync_skills(api, [{"path": "openwebui/skills/oracle-elt", "public": True}])
+        self.assertEqual(api.posts[0][0], "/api/v1/skills/id/oracle-elt/update")
+        self.assertTrue(all(p == "/api/v1/skills/create" for p, _ in api.posts[1:]))
+        self.assertEqual(api.posts[0][1]["access_grants"][0]["principal_id"], "*")
 
 
 if __name__ == "__main__":

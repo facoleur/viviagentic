@@ -87,6 +87,14 @@ ENABLE_IMAGE_PROMPT_GENERATION = false
 IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE = ""
 TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE = ""
 
+# Skills : chaque .md du dossier (SKILL.md, references/*.md) devient un skill nomme par son
+# frontmatter. Open WebUI ne montre au modele que leur liste (id + description) et le modele
+# charge le contenu utile avec l'outil integre `view_skill` (function_calling "native" requis).
+# public = true : lisibles par tous les comptes, sinon seul l'admin y aurait acces.
+[[skills]]
+path = "openwebui/skills/oracle-elt"
+public = true
+
 # Entrees de modele : attache les tools au modele pour qu'ils soient toujours
 # disponibles, sans que l'utilisateur ait a les cocher dans le chat.
 # L'id d'un tool server est "server:<type>:<info.id>", d'ou "server:mcp:vivia".
@@ -96,7 +104,10 @@ TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE = ""
 id = "qwen3:8b"
 name = "qwen3:8b"
 is_active = true
-meta = { description = "Qwen3 8B + tools MCP vivia", toolIds = ["server:mcp:vivia"] }
+meta = { description = "Qwen3 8B + tools MCP vivia", toolIds = ["server:mcp:vivia"], skillIds = [
+  "oracle-elt", "oracle-elt-erreurs", "oracle-elt-syntaxe-26ai", "oracle-elt-patterns",
+  "oracle-elt-performance", "oracle-elt-plsql", "oracle-elt-dictionnaire",
+] }
 params = { function_calling = "native" }
 
 [[functions]]

@@ -16,12 +16,13 @@ make configure                         # applique vivia.toml a Open WebUI
 ## Configuration
 
 Tout passe par `vivia.toml` : admin, utilisateurs, groupes, permissions par defaut,
-modele par defaut, tool servers MCP, filter functions. `make configure` est idempotent,
+modele par defaut, tool servers MCP, skills, functions. `make configure` est idempotent,
 rejouable a volonte, et ne demande jamais de passer par l'UI.
 
 Chaque table `[api."<chemin>"]` est POSTee telle quelle sur `/api/v1/<chemin>` : ajouter ou
 retirer un reglage ne demande aucune modification de code, et n'importe quel endpoint de
-configuration est atteignable. Seules `[[groups]]` et `[[functions]]` ont un schema fixe.
+configuration est atteignable. Seules `[[groups]]`, `[[skills]]`, `[[models]]` et `[[functions]]`
+ont un schema fixe, chacune traitee par un module de `src/vivia/configure/`.
 Les noms de cles sont documentes dans
 <https://docs.openwebui.com/getting-started/env-configuration/>.
 
@@ -32,6 +33,19 @@ dans `[[models]]` (ici `qwen3:8b`) restent proposes : tout autre modele liste pa
 dans Ollama est desactive au `make configure` suivant. Le modele d'arene est coupe par
 `[api."evaluations/config"]`. Desactiver `nomic-embed-text` ici ne touche pas aux embeddings
 RAG, qui l'appellent directement.
+
+### Skills
+
+`[[skills]]` pointe un dossier : chaque `.md` (`SKILL.md`, `references/*.md`) devient un skill
+Open WebUI nomme par son frontmatter (`name`, `description`), car Open WebUI 0.10 ne gere
+qu'un contenu par skill. Les ids listes dans `meta.skillIds` d'un modele lui sont attaches :
+le modele recoit leur liste (id + description) et charge le contenu dont il a besoin avec
+l'outil integre `view_skill`, ce qui demande `function_calling = "native"`.
+
+`openwebui/skills/oracle-elt/` aide a ecrire du SQL et du PL/SQL Oracle (26ai) qui compile :
+regles et pieges du dialecte dans `SKILL.md`, puis erreurs ORA, syntaxe 23ai/26ai, patterns
+de chargement ELT, performance, PL/SQL et dictionnaire en skills separes. Synthese filtree de
+<https://github.com/oracle/skills> (licence UPL 1.0), completee sur ce que ce depot couvre peu.
 
 Les generations auxiliaires (titre de conversation, tags, questions de suivi, autocompletion,
 reformulation de requete) sont desactivees via `[api."tasks/config/update"]` : le modele ne
