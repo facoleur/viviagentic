@@ -94,19 +94,20 @@ class Harness(unittest.IsolatedAsyncioTestCase):
 
 
 class TracingTests(Harness):
-    async def test_two_turns_and_reload_share_one_root_and_trace(self):
+    async def test_each_turn_is_a_root_trace_of_the_chat_session(self):
+        # Phoenix affiche une session comme la suite des input/output des racines de ses
+        # traces : chaque tour doit etre une trace dont la racine porte question et reponse.
         await self.emit(body())
         await self.emit(body("a2", output=tool()), filter_=self.new_filter())
-        roots = self.spans("open-webui.conversation")
         turns = self.spans("open-webui.chat")
         tools = self.spans("tool.vivia_roll_dice")
-        self.assertEqual(len({s.context.trace_id for s in self.spans()}), 1)
-        self.assertEqual(roots[0].context.span_id, roots[1].context.span_id)
-        self.assertNotEqual(turns[0].context.span_id, turns[1].context.span_id)
-        self.assertTrue(all(s.parent.span_id == roots[0].context.span_id for s in turns))
+        self.assertEqual(len(self.spans("open-webui.conversation")), 0)
+        self.assertTrue(all(s.parent is None for s in turns))
+        self.assertNotEqual(turns[0].context.trace_id, turns[1].context.trace_id)
         self.assertEqual(tools[0].parent.span_id, turns[1].context.span_id)
-        self.assertTrue(all(s.parent is None for s in roots))
-        self.assertEqual(roots[0].start_time, roots[0].end_time)
+        self.assertEqual(tools[0].context.trace_id, turns[1].context.trace_id)
+        self.assertEqual(turns[0].attributes["input.value"], "Lance quatre dés.")
+        self.assertEqual(turns[0].attributes["output.value"], "Total : 29.")
         self.assertTrue(all(s.attributes["session.id"] == "chat1" for s in self.spans()))
 
     async def test_only_current_message_tools_are_paired_by_call_id(self):
@@ -150,7 +151,7 @@ class TracingTests(Harness):
         await self.emit(body(), filter_=other)
         for _ in range(2):
             await self.emit(body(chat_id=""), {"session_id": "same-browser-socket"})
-        roots = self.spans("open-webui.conversation")
+        roots = self.spans("open-webui.chat")
         self.assertEqual(len({s.context.trace_id for s in roots}), 6)
         self.assertTrue(all("session.id" not in s.attributes for s in roots[-2:]))
 
@@ -214,7 +215,7 @@ class TracingTests(Harness):
             self.assertEqual(trace.get_current_span(), ambient)
             self.assertNotEqual(
                 ambient.get_span_context().trace_id,
-                self.spans("open-webui.conversation")[0].context.trace_id,
+                self.spans("open-webui.chat")[0].context.trace_id,
             )
         self.assertIsNone(tracing._SPAN_IDS.get())
 
@@ -338,7 +339,8 @@ class TracingTests(Harness):
         first, second = self.spans("llm.call.1")[0], self.spans("llm.call.2")[0]
         turn = self.spans("open-webui.chat")[0]
         tool_span = self.spans("tool.vivia_roll_dice")[0]
-        self.assertEqual(len(self.spans()), 5)
+        self.assertEqual(len(self.spans()), 4)
+        self.assertIsNone(turn.parent)
         self.assertEqual({s.context.trace_id for s in self.spans()}, {turn.context.trace_id})
         self.assertTrue(
             all(s.parent.span_id == turn.context.span_id for s in [first, tool_span, second])

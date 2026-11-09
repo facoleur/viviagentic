@@ -1,8 +1,8 @@
 """
 title: Phoenix Tracing
 author: vivia
-version: 0.6.0
-description: Une trace par conversation (tours, appels LLM, TTFT, outils). Open WebUI 0.10+.
+version: 0.7.0
+description: Une trace par tour, une session Phoenix par chat (LLM, TTFT, outils). OWUI 0.10+.
 requirements: arize-phoenix-otel, openinference-semantic-conventions
 """
 
@@ -331,7 +331,9 @@ class Filter:
         return self._tracer
 
     def _span(self, name: str, scope: tuple, key: tuple, **kwargs) -> trace.Span:
-        ids = (_id(*scope, size=16), _id(*scope, *key, size=8))
+        # Le trace id ne sert qu'aux racines (les enfants heritent de leur parent) :
+        # une trace par tour, le span id restant celui que recalcule `vivia.annotate`.
+        ids = (_id(*scope, *key, size=16), _id(*scope, *key, size=8))
         token = _SPAN_IDS.set(ids)
         try:
             return self.tracer.start_span(name, **kwargs)
@@ -447,31 +449,13 @@ class Filter:
         started = metadata.get(_STARTED) or _ns(message.get("timestamp")) or ended
         started = min(started, ended)
         history = messages[: index + 1]
-        anchor_time = next(
-            (ts for m in history if (ts := _ns(m.get("timestamp"))) is not None), started
-        )
-        # Conversation lifetimes are open-ended. Export a zero-duration anchor,
-        # not an unfinished root or an invented conversation duration. Re-emitting
-        # its stable ID is safe: Phoenix ignores spans it has already ingested.
-        anchor_time = min(anchor_time, started)
-        root = self._span(
-            "open-webui.conversation",
-            scope,
-            ("conversation",),
-            context=Context(),
-            start_time=anchor_time,
-            attributes={
-                **common,
-                SA.OPENINFERENCE_SPAN_KIND: Kind.CHAIN.value,
-                "openwebui.conversation.anchor": True,
-            },
-        )
-        root.end(end_time=anchor_time)
         span = self._span(
             "open-webui.chat",
             scope,
             ("message", message_id),
-            context=trace.set_span_in_context(root, Context()),
+            # Racine de sa propre trace : Phoenix affiche une session comme la suite des
+            # input/output des spans racines de ses traces (une trace = un tour).
+            context=Context(),
             start_time=started,
             attributes={
                 **common,

@@ -62,20 +62,20 @@ cette notification, jamais a `load`.
 ## Telemetrie
 
 La filter function `openwebui/functions/phoenix_tracing.py` (installee par `make configure`)
-emet une trace par conversation, un span CHAIN par tour de chat, puis des spans enfants
-LLM pour chaque appel au modele et TOOL pour les executions d'outils, au format
+emet une trace par tour de chat, dont la racine est un span CHAIN (question et reponse),
+puis des spans enfants LLM pour chaque appel au modele et TOOL pour les executions d'outils, au format
 OpenInference, vers `http://phoenix:6006/v1/traces`.
 Traces visibles sur http://127.0.0.1:6006 (projet
 `open-webui`), sans authentification : `PHOENIX_ENABLE_AUTH=false`, sinon l'ingestion OTLP
 exigerait une cle d'API.
 
-Les identifiants derives du projet, de l'utilisateur et du `chat_id` conservent la meme
-trace apres un rechargement du filtre. Le span racine `open-webui.conversation` est un
-point de rattachement de duree nulle : Open WebUI ne fournit pas d'evenement de fermeture
-definitive d'un chat. Les spans des tours et des outils portent leurs propres durees.
-Phoenix ignore les spans deja recus avec le meme identifiant, y compris la racine
-reenvoyee a chaque tour. `session.id` reste egal au `chat_id` ; le `session_id` WebUI
-(connexion navigateur) n'est jamais utilise pour regrouper les conversations.
+Les traces d'un meme chat portent `session.id` = `chat_id` : l'onglet Sessions de Phoenix
+affiche la conversation comme la suite des input/output des spans racines de ses traces,
+d'ou une trace par tour (avec un span racine commun a toute la conversation, la session ne
+montrerait qu'une entree vide). Le `session_id` WebUI (connexion navigateur) n'est jamais
+utilise pour regrouper les conversations. Les identifiants, derives du projet, de
+l'utilisateur, du `chat_id` et du `message_id`, restent les memes apres un rechargement du
+filtre : Phoenix ignore un tour deja recu.
 
 Compatible avec le format `output` d'Open WebUI 0.10 a 0.13 : seuls les `function_call` du
 message courant sont traces, avec leur `function_call_output` associe par `call_id`,
