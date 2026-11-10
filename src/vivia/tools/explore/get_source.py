@@ -1,5 +1,9 @@
 """Code source PL/SQL stocke (ALL_SOURCE), par pages de 200 lignes."""
 
+from typing import Annotated
+
+from pydantic import Field
+
 from vivia.oracle import client
 from vivia.oracle import format as fmt
 from vivia.oracle.identifiers import ResolutionError, resolve
@@ -8,7 +12,23 @@ from vivia.tools.explore import queries
 _PAGE = 200
 
 
-def get_source(objet: str, de_ligne: int = 1, a_ligne: int | None = None) -> str:
+def get_source(
+    objet: Annotated[
+        str,
+        Field(
+            description="Objet PL/SQL stocke (package, procedure, fonction, trigger), "
+            "'SCHEMA.NOM' ou nom seul si non ambigu."
+        ),
+    ],
+    de_ligne: Annotated[int, Field(description="Premiere ligne a afficher (1-indexee).", ge=1)] = 1,
+    a_ligne: Annotated[
+        int | None,
+        Field(
+            description="Derniere ligne a afficher. Par defaut, de_ligne + 199 "
+            "(page de 200 lignes maximum)."
+        ),
+    ] = None,
+) -> str:
     """Code source d'un objet PL/SQL stocke (package, procedure, fonction, trigger).
 
     200 lignes au maximum par appel ; rappeler avec `de_ligne` pour la suite.

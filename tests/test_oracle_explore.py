@@ -5,6 +5,7 @@ import unittest
 from tests.oracle_env import require_oracle
 from vivia.tools.explore.check_grain import check_grain
 from vivia.tools.explore.column_stats import column_stats
+from vivia.tools.explore.compare_sql import compare_sql
 from vivia.tools.explore.compile_sql import compile_sql
 from vivia.tools.explore.describe_table import describe_table
 from vivia.tools.explore.find_usages import find_usages
@@ -97,6 +98,41 @@ class OracleExploreTests(unittest.TestCase):
     def test_get_source_reports_an_unknown_object_cleanly(self):
         result = get_source("NOPE_PACKAGE_XYZ")
         self.assertIn("Erreur", result)
+
+    def test_compare_sql_reports_identical_when_logic_is_unchanged(self):
+        # Operation 1 du flux TIERS (SDATRG.M_OPERATION, init.sql) : meme SQL mot pour mot.
+        result = compare_sql(
+            "TIERS",
+            1,
+            "SELECT * FROM SDATRG.TIERS WHERE DATE_CREATION <= TO_DATE('#PNDATE#','YYYYMMDD')",
+        )
+        self.assertIn("IDENTIQUE", result)
+
+    def test_compare_sql_reports_different_when_logic_changes(self):
+        result = compare_sql("TIERS", 1, "SELECT * FROM SDATRG.TIERS WHERE SEGMENT = 'PRO'")
+        self.assertIn("DIFFERENT", result)
+
+    def test_compare_sql_reports_the_ora_error_on_the_new_sql(self):
+        result = compare_sql("TIERS", 1, "SELECT nope_column FROM SDATRG.TIERS")
+        self.assertIn("ORA-00904", result)
+
+    def test_compare_sql_rejects_dml(self):
+        result = compare_sql("TIERS", 1, "DELETE FROM SDATRG.TIERS")
+        self.assertIn("Rejete", result)
+
+    def test_compare_sql_unknown_operation_gives_an_actionable_error(self):
+        result = compare_sql("NOPE_FLUX_XYZ", 999, "SELECT 1 FROM DUAL")
+        self.assertIn("introuvable", result)
+
+    def test_compare_sql_reports_a_timeout_distinctly_from_a_compile_error(self):
+        # Produit volontairement trop de lignes pour un budget d'1s, quelle que soit la machine.
+        slow = (
+            "SELECT a.c FROM "
+            "(SELECT LEVEL c FROM DUAL CONNECT BY LEVEL <= 6000) a, "
+            "(SELECT LEVEL c FROM DUAL CONNECT BY LEVEL <= 6000) b"
+        )
+        result = compare_sql("TIERS", 1, slow, max_seconds=1)
+        self.assertIn("Depassement", result)
 
 
 if __name__ == "__main__":

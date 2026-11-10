@@ -5,10 +5,9 @@ Seul module a produire du texte affiche : les tools n'assemblent pas de Markdown
 
 import oracledb
 
-MAX_CHARS = 8000  # ~2000 tokens
+from vivia.oracle import glossary
 
-_ZONES = {"SDA": "sources", "SDE": "donnees transformees", "DMD": "data marts"}
-_TYPES = {"STG": "staging", "TRG": "cibles", "INT": "vues d'interface"}
+MAX_CHARS = 8000  # ~2000 tokens
 
 
 def markdown_table(
@@ -106,14 +105,39 @@ def compile_ok(columns: list[tuple[str, str]]) -> str:
     return "OK — colonnes : " + ", ".join(f"{name} ({kind})" for name, kind in columns)
 
 
+# --- compare_sql -------------------------------------------------------------------------------
+
+
+def compare_sql_timeout(max_seconds: float, nouveau: bool) -> str:
+    cote = "nouveau" if nouveau else "original (M_OPERATION)"
+    return (
+        f"Depassement de max_seconds={max_seconds:g}s sur le SQL {cote} — pas une erreur de "
+        "compilation. Pour iterer vite : filtrer/reduire temporairement le volume dans le SQL "
+        "lui-meme. Pour mesurer l'operation reelle : rappeler avec un `max_seconds` plus grand."
+    )
+
+
+def compare_sql_report(
+    n_old: int,
+    checksum_old: int,
+    duree_old: float,
+    n_new: int,
+    checksum_new: int,
+    duree_new: float,
+) -> str:
+    identique = n_old == n_new and checksum_old == checksum_new
+    verdict = "IDENTIQUE" if identique else "DIFFERENT — ne pas deployer, verifier la logique"
+    delta = duree_old - duree_new
+    pct = (delta / duree_old * 100) if duree_old else 0.0
+    return (
+        f"Resultat : {verdict}\n"
+        f"- original : {n_old} ligne(s), checksum {checksum_old}, {duree_old:.2f}s\n"
+        f"- nouveau  : {n_new} ligne(s), checksum {checksum_new}, {duree_new:.2f}s\n"
+        f"- gain : {delta:+.2f}s ({pct:+.1f}%)"
+    )
+
+
 # --- describe_table --------------------------------------------------------------------------
-
-
-def _zone_type(schema: str) -> str:
-    zone, kind = schema[:3], schema[3:]
-    if zone in _ZONES and kind in _TYPES:
-        return f"{zone} ({_ZONES[zone]}) / {kind} ({_TYPES[kind]})"
-    return "zone/type non reconnus (hors convention SDA/SDE/DMD x STG/TRG/INT)"
 
 
 def unknown_object(obj) -> str:
@@ -121,7 +145,7 @@ def unknown_object(obj) -> str:
 
 
 def describe_table_report(obj, cols, pk, uniques, part, partition_kind, view_text) -> str:
-    lines = [f"## {obj}", "", f"Zone/type : {_zone_type(obj.schema)}", "", "### Colonnes"]
+    lines = [f"## {obj}", "", f"Zone/type : {glossary.zone_type(obj.schema)}", "", "### Colonnes"]
     lines += [
         f"- `{c}` {t}{' NULL' if n == 'Y' else ' NOT NULL'}{f' — {m}' if m else ''}"
         for c, t, n, m in cols
@@ -197,4 +221,26 @@ def search_objects_report(texte: str, zone: str | None, rows: list[tuple], limit
     lines = [f"- `{o}.{n}` ({t}){f' — {c}' if c else ''}" for o, n, t, c in rows]
     if len(rows) >= limit:
         lines.append(f"\n… limite a {limit} resultats, preciser `zone` ou le texte.")
+    return "\n".join(lines)
+
+
+# --- distinct_values ---------------------------------------------------------------------------
+
+
+def distinct_values_report(col: str, rows: list[tuple], limit: int) -> str:
+    values = ", ".join("NULL" if v is None else str(v) for (v,) in rows)
+    text = f"`{col}` : {values}" if rows else f"`{col}` : aucune valeur."
+    if len(rows) >= limit:
+        text += f" … (limite a {limit}, augmenter `limite` si besoin)"
+    return text
+
+
+# --- get_dependencies ----------------------------------------------------------------------------
+
+
+def dependencies_report(table_cible: str, rows: list[tuple]) -> str:
+    if not rows:
+        return f"Aucune dependance declaree dans TRAC_DATA pour {table_cible}."
+    lines = [f"## Sources necessaires a {table_cible}"]
+    lines += [f"- `{source}` (chaine {chaine}, flux {flux})" for chaine, flux, source in rows]
     return "\n".join(lines)

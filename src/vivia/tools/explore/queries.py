@@ -13,7 +13,25 @@ CHECK_GRAIN_DUPLICATES = (
 
 COLUMN_STATS_LIVE = "SELECT {selects} FROM {obj} WHERE {filtre}"
 
+COMPARE_SQL_PROBE = "SELECT COUNT(*) n, SUM(ORA_HASH(JSON_OBJECT(*))) checksum FROM (\n{sql}\n)"
+
 COMPILE_SQL_PROBE = "SELECT * FROM (\n{sql}\n) WHERE 1 = 0 FETCH FIRST 0 ROWS ONLY"
+
+DISTINCT_VALUES = "SELECT DISTINCT {col} FROM {obj} ORDER BY {col} FETCH FIRST {limit} ROWS ONLY"
+
+# Une ligne par (table cible, table source) declaree par le framework ETL, par zone (TRAC_DATA
+# existe une fois par schema *TRG, comme M_OPERATION) ; {schema} = "SDATRG", "SDETRG", etc.
+TRAC_DATA_BY_ZONE = (
+    "SELECT chaine, flux, table_source FROM {schema}.TRAC_DATA WHERE table_cible = :cible"
+)
+TRAC_DATA_DEPENDENCIES = "SELECT * FROM ({unioned}) ORDER BY chaine, flux"
+
+FIND_OPERATION_SCHEMAS = "SELECT DISTINCT owner FROM all_tables WHERE table_name = 'M_OPERATION'"
+
+FIND_OPERATION_IN_SCHEMA = (
+    "SELECT '{schema}' owner, sql_text FROM {schema}.M_OPERATION "
+    "WHERE flux = :flux AND id_operation = :operation"
+)
 
 DESCRIBE_TABLE_COLUMNS = """
     SELECT c.column_name, c.data_type, c.nullable, m.comments

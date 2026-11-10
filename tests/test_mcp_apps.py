@@ -49,7 +49,7 @@ class WiringTests(unittest.IsolatedAsyncioTestCase):
     async def test_plain_tools_stay_plain(self):
         async with Client(mcp) as client:
             tools = {tool.name: tool for tool in await client.list_tools()}
-        for name in ("now", "calc", "roll_dice", "text_stats"):
+        for name in ("describe_table", "run_select", "search_objects"):
             with self.subTest(tool=name):
                 meta = getattr(tools[name], "meta", None) or {}
                 self.assertNotIn("ui", meta)

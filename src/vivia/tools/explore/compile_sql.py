@@ -1,6 +1,9 @@
 """Verifie qu'une requete SELECT/WITH se compilerait, sans jamais l'executer pour de vrai."""
 
+from typing import Annotated
+
 import oracledb
+from pydantic import Field
 
 from vivia.oracle import client
 from vivia.oracle import format as fmt
@@ -9,7 +12,22 @@ from vivia.tools.explore import queries
 from vivia.tools.explore import templates as sql_templates
 
 
-def compile_sql(sql: str, templates: dict[str, str] | None = None) -> str:
+def compile_sql(
+    sql: Annotated[
+        str,
+        Field(
+            description="Une seule instruction SELECT ou WITH a valider (templates #NOM# "
+            "acceptes). Jamais executee, seulement compilee."
+        ),
+    ],
+    templates: Annotated[
+        dict[str, str] | None,
+        Field(
+            description="Valeurs pour les templates #NOM# du SQL, ex. {'SCH': 'SDATRG'}. "
+            "Un template omis prend un defaut type par son nom (date, nombre ou texte)."
+        ),
+    ] = None,
+) -> str:
     """Valide un SELECT/WITH (templates #NOM# remplaces) sans l'executer ni lire une ligne.
 
     Renvoie les colonnes produites (nom, type), ou le code ORA-, la ligne/colonne dans le SQL

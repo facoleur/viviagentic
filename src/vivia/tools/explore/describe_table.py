@@ -1,12 +1,24 @@
 """Fiche complete d'une table ou vue, en un seul appel."""
 
+from typing import Annotated
+
+from pydantic import Field
+
 from vivia.oracle import client
 from vivia.oracle import format as fmt
 from vivia.oracle.identifiers import ResolutionError, resolve
 from vivia.tools.explore import queries
 
 
-def describe_table(name: str) -> str:
+def describe_table(
+    name: Annotated[
+        str,
+        Field(
+            description="Table ou vue a decrire, 'SCHEMA.TABLE' ou nom seul (erreur si ambigu "
+            "entre plusieurs schemas)."
+        ),
+    ],
+) -> str:
     """Fiche d'une table ou vue : colonnes, cle, index uniques, partitionnement, volumetrie, zone.
 
     Accepte "SCHEMA.TABLE" ou un nom seul (ambiguite levee si plusieurs schemas correspondent).

@@ -6,6 +6,9 @@ retape pas la base : mis en cache en memoire, borne pour ne pas grossir indefini
 """
 
 from functools import lru_cache
+from typing import Annotated
+
+from pydantic import Field
 
 from vivia.oracle import client
 from vivia.oracle import format as fmt
@@ -24,7 +27,25 @@ def _fetch_stats(obj: str, cols: tuple[str, ...], filtre: str) -> tuple[list[str
     return client.fetch(queries.COLUMN_STATS_LIVE.format(selects=selects, obj=obj, filtre=filtre))
 
 
-def column_stats(table: str, colonnes: list[str], filtre: str | None = None) -> str:
+def column_stats(
+    table: Annotated[
+        str, Field(description="Table ou vue a analyser, 'SCHEMA.NOM' ou nom seul si non ambigu.")
+    ],
+    colonnes: Annotated[
+        list[str],
+        Field(
+            description="Colonnes a profiler (ex. ['segment', 'pays']). Chacune recoit "
+            "COUNT DISTINCT, nulls, min, max."
+        ),
+    ],
+    filtre: Annotated[
+        str | None,
+        Field(
+            description="Clause WHERE sans le mot-cle WHERE, pour restreindre le calcul a un "
+            "sous-ensemble de lignes."
+        ),
+    ] = None,
+) -> str:
     """Stats reelles par colonne (distinctes, nulls, min, max) ; `filtre` restreint le calcul.
 
     Exemple : column_stats("DMDTRG.D_TIERS", ["segment", "pays"])

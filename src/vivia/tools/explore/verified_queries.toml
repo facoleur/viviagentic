@@ -1,0 +1,15 @@
+# Requetes validees a la main : few-shot pour les questions analytiques recurrentes.
+# Contenu indicatif (a remplacer par de vraies requetes validees) : seule l'architecture
+# (recherche par mot-cle sur `question`) compte pour l'instant.
+
+[[queries]]
+question = "Combien de tiers ont ete crees avant une date donnee ?"
+sql = "SELECT COUNT(*) FROM SDATRG.TIERS WHERE DATE_CREATION <= TO_DATE('#PNDATE#','YYYYMMDD')"
+
+[[queries]]
+question = "Quels mouvements existent pour un tiers donne ?"
+sql = "SELECT * FROM SDATRG.MOUVEMENT WHERE ID_TIERS = :id_tiers"
+
+[[queries]]
+question = "Quel est le segment et le score de risque d'un client ?"
+sql = "SELECT SEGMENT, SCORE_RISQUE FROM DMDTRG.W_CLIENT_360 WHERE ID_TIERS = :id_tiers"

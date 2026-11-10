@@ -1,6 +1,9 @@
 """Execute un SELECT libre en lecture seule, borne en lignes et en temps."""
 
+from typing import Annotated
+
 import oracledb
+from pydantic import Field
 
 from vivia.oracle import client
 from vivia.oracle import format as fmt
@@ -10,7 +13,24 @@ from vivia.tools.explore import queries
 _DEFAULT_MAX_ROWS = 50
 
 
-def run_select(sql: str, max_rows: int = _DEFAULT_MAX_ROWS) -> str:
+def run_select(
+    sql: Annotated[
+        str,
+        Field(
+            description="Une seule instruction SELECT ou WITH, lecture seule (verifiee par "
+            "sqlglot). Pas de point-virgule final ni de second statement."
+        ),
+    ],
+    max_rows: Annotated[
+        int,
+        Field(
+            description="Nombre maximal de lignes renvoyees ; ajoute automatiquement en "
+            "FETCH FIRST.",
+            ge=1,
+            le=500,
+        ),
+    ] = _DEFAULT_MAX_ROWS,
+) -> str:
     """Execute un SELECT ou WITH deja ecrit, lecture seule. Une seule instruction (verifiee par
     sqlglot), `FETCH FIRST` ajoute automatiquement, delai maximal du compte applique.
 

@@ -1,0 +1,17 @@
+# Glossaire zones/types/termes. Contenu indicatif (a adapter a la vraie base) : seule
+# l'architecture (comment c'est lu et expose) compte pour l'instant.
+
+[zones]
+SDA = "sources applicatives : copie fidele du systeme source"
+SDE = "sources enrichies : donnees nettoyees/historisees"
+DMD = "data marts : modele de consommation BI"
+
+[types]
+STG = "staging : zone de transit technique, ecrasee a chaque run"
+TRG = "target : table cible stable de la zone"
+INT = "interface : vue exposee a la zone suivante"
+
+[termes]
+TIERS = "client ou partie prenante d'une operation bancaire"
+FLUX = "etape d'une chaine ETL, alimente une table cible"
+CHAINE = "enchainement ordonne de flux dans le framework M_OPERATION"

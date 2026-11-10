@@ -2,3 +2,6 @@
 vivia.users.toml
 .venv/
 __pycache__/
+.pytest_cache/
+.ruff_cache/
+

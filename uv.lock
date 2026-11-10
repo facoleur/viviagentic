@@ -2076,6 +2076,7 @@ source = { editable = "." }
 dependencies = [
     { name = "fastmcp" },
     { name = "oracledb" },
+    { name = "pydantic" },
     { name = "sqlfluff" },
     { name = "sqlglot" },
     { name = "tzdata" },
@@ -2096,6 +2097,7 @@ ops = [
 requires-dist = [
     { name = "fastmcp", specifier = ">=4.1" },
     { name = "oracledb", specifier = ">=3.0" },
+    { name = "pydantic", specifier = ">=2.14" },
     { name = "sqlfluff", specifier = ">=4.5.0" },
     { name = "sqlglot", specifier = ">=30.29.0" },
     { name = "tzdata", specifier = ">=2025.1" },

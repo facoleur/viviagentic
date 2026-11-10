@@ -10,10 +10,9 @@ import os
 
 from fastmcp import FastMCP
 
-from vivia.mcp import explore, lineage, rendering, sanity
+from vivia.mcp import explore, lineage, rendering
 
 mcp = FastMCP("vivia")
-mcp.mount(sanity.mcp)
 mcp.mount(rendering.mcp)
 mcp.mount(lineage.mcp)
 mcp.mount(explore.mcp)

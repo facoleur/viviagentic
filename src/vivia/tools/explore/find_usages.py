@@ -1,5 +1,9 @@
 """Qui utilise un objet : dependances PL/SQL et source citant son nom."""
 
+from typing import Annotated
+
+from pydantic import Field
+
 from vivia.oracle import client
 from vivia.oracle import format as fmt
 from vivia.oracle.identifiers import ResolutionError, resolve
@@ -8,7 +12,15 @@ from vivia.tools.explore import queries
 _LIMIT = 20
 
 
-def find_usages(name: str) -> str:
+def find_usages(
+    name: Annotated[
+        str,
+        Field(
+            description="Objet dont on cherche les usages (table, vue, package...), "
+            "'SCHEMA.NOM' ou nom seul si non ambigu."
+        ),
+    ],
+) -> str:
     """Dependances PL/SQL (ALL_DEPENDENCIES) et code source citant `name` (ALL_SOURCE).
 
     Les operations ELT qui le citent arriveront avec l'index hors ligne (phase 2).
