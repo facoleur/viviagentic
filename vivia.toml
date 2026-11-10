@@ -110,6 +110,18 @@ meta = { description = "Qwen3 8B + tools MCP vivia", toolIds = ["server:mcp:vivi
 ] }
 params = { function_calling = "native" }
 
+# Servi par OpenRouter (connexion OpenAI-compatible, cle dans .env) plutot que par
+# Ollama en local : meme jeu de tools/skills que qwen3:8b.
+[[models]]
+id = "qwen/qwen3.8-27b"
+name = "qwen/qwen3.8-27b"
+is_active = true
+meta = { description = "Qwen3.8 27B (OpenRouter) + tools MCP vivia", toolIds = ["server:mcp:vivia"], skillIds = [
+  "oracle-elt", "oracle-elt-erreurs", "oracle-elt-syntaxe-26ai", "oracle-elt-patterns",
+  "oracle-elt-performance", "oracle-elt-plsql", "oracle-elt-dictionnaire",
+] }
+params = { function_calling = "native" }
+
 [[functions]]
 id = "phoenix_tracing"
 name = "Phoenix Tracing"

@@ -7,7 +7,11 @@ services:
     ports: ["${VIVIA_PORT:-3000}:8080"]
     environment:
       OLLAMA_BASE_URL: http://ollama:11434
-      ENABLE_OPENAI_API: "false"
+      # Connexion OpenAI-compatible vers OpenRouter, pour les modeles distants
+      # declares dans vivia.toml (en plus des modeles Ollama locaux).
+      ENABLE_OPENAI_API: "true"
+      OPENAI_API_BASE_URLS: https://openrouter.ai/api/v1
+      OPENAI_API_KEYS: ${OPENROUTER_API_KEY:?set it in .env}
       WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:?set it in .env}
       # Embeddings via Ollama : evite un telechargement HuggingFace a chaque boot.
       RAG_EMBEDDING_ENGINE: ollama
