@@ -32,6 +32,13 @@ __all__ = [
 def main() -> None:
     path = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "vivia.toml"
     cfg = tomllib.loads(path.read_text())
+
+    # Comptes et groupes : non commites (mots de passe en clair), dans un fichier a cote.
+    users_path = path.with_name("vivia.users.toml")
+    if not users_path.exists():
+        sys.exit(f"{users_path} absent (copier vivia.users.toml.example)")
+    cfg |= tomllib.loads(users_path.read_text())
+
     api = OpenWebUI(cfg["openwebui"]["url"], cfg["admin"])
     print(f"> {cfg['openwebui']['url']} (admin {cfg['admin']['email']})")
 

@@ -1,4 +1,4 @@
-"""Connexion Oracle en lecture seule, et detection des privileges optionnels.
+"""Connexion Oracle en lecture seule, une connexion par appel.
 
 Toute la configuration vient de l'environnement, comme `PORT` dans
 `vivia.mcp.server` : `ORACLE_DSN`, `ORACLE_USER`, `ORACLE_PASSWORD` (obligatoires),
@@ -7,9 +7,8 @@ suppose lecture seule (SELECT) ; ce module n'execute jamais de DDL/DML.
 """
 
 import os
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
-from functools import lru_cache
 from typing import Any
 
 import oracledb
@@ -19,7 +18,7 @@ MAX_ROWS = int(os.getenv("ORACLE_MAX_ROWS", "500"))
 
 
 @contextmanager
-def connection() -> Iterator[oracledb.Connection]:
+def connection() -> Generator[oracledb.Connection]:
     """Une connexion par appel : ces outils servent un agent a la fois, pas un pool partage."""
     conn = oracledb.connect(
         dsn=os.environ["ORACLE_DSN"],
@@ -52,21 +51,3 @@ def describe(sql: str, params: dict[str, Any] | None = None) -> list[tuple[str, 
     with connection() as conn, conn.cursor() as cursor:
         cursor.execute(sql, params or {})
         return [(d[0], d[1].name.removeprefix("DB_TYPE_")) for d in cursor.description]
-
-
-def convert_raw(raw: bytes, out_type: Any) -> Any:
-    """Decode une valeur RAW d'ALL_TAB_COL_STATISTICS via DBMS_STATS.CONVERT_RAW_VALUE."""
-    with connection() as conn, conn.cursor() as cursor:
-        out = cursor.var(out_type)
-        cursor.execute("BEGIN DBMS_STATS.CONVERT_RAW_VALUE(:raw, :out); END;", raw=raw, out=out)
-        return out.getvalue()
-
-
-@lru_cache
-def has_dbms_stats_convert_raw() -> bool:
-    """EXECUTE sur DBMS_STATS : requis par `column_stats` pour decoder min/max du catalogue."""
-    try:
-        convert_raw(b"\x41", oracledb.DB_TYPE_VARCHAR)
-        return True
-    except oracledb.DatabaseError:
-        return False

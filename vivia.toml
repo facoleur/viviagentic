@@ -7,6 +7,9 @@
 # Endpoints de l'API :
 #   https://docs.openwebui.com/getting-started/api-endpoints/
 #   Swagger de l'instance : http://localhost:3000/docs (demande ENV=dev)
+#
+# Comptes et groupes ([admin], [[users]], [[groups]]) : pas ici, mais dans
+# vivia.users.toml (non commite, mots de passe en clair). Voir vivia.users.toml.example.
 
 [openwebui]
 url = "http://localhost:3000"
@@ -17,28 +20,6 @@ only_declared_models = true
 # Vu depuis l'hote : les valves du filtre, elles, adressent le reseau Docker.
 [phoenix]
 url = "http://127.0.0.1:6006"
-
-# Premier compte cree => admin.
-[admin]
-name = "admin"
-email = "admin@vivia.local"
-password = "changeme123"
-
-[[users]]
-name = "Tester"
-email = "tester@vivia.local"
-password = "tester123"
-role = "user"
-groups = ["testers"]
-
-[[groups]]
-name = "testers"
-description = "Comptes de test, acces lecture seule au workspace"
-
-[groups.permissions]
-workspace = { models = false, knowledge = false, prompts = false, tools = false }
-chat = { file_upload = false, delete = true, edit = true, temporary = true }
-features = { web_search = false, image_generation = false, code_interpreter = false }
 
 # ---------------------------------------------------------------------------
 # Chaque table [api."<chemin>"] est POSTee telle quelle sur /api/v1/<chemin>.
@@ -104,9 +85,16 @@ public = true
 id = "qwen3:8b"
 name = "qwen3:8b"
 is_active = true
-meta = { description = "Qwen3 8B + tools MCP vivia", toolIds = ["server:mcp:vivia"], skillIds = [
-  "oracle-elt", "oracle-elt-erreurs", "oracle-elt-syntaxe-26ai", "oracle-elt-patterns",
-  "oracle-elt-performance", "oracle-elt-plsql", "oracle-elt-dictionnaire",
+meta = { description = "Qwen3 8B + tools MCP vivia", toolIds = [
+  "server:mcp:vivia",
+], skillIds = [
+  "oracle-elt",
+  "oracle-elt-erreurs",
+  "oracle-elt-syntaxe-26ai",
+  "oracle-elt-patterns",
+  "oracle-elt-performance",
+  "oracle-elt-plsql",
+  "oracle-elt-dictionnaire",
 ] }
 params = { function_calling = "native" }
 
@@ -116,9 +104,16 @@ params = { function_calling = "native" }
 id = "qwen/qwen3.8-27b"
 name = "qwen/qwen3.8-27b"
 is_active = true
-meta = { description = "Qwen3.8 27B (OpenRouter) + tools MCP vivia", toolIds = ["server:mcp:vivia"], skillIds = [
-  "oracle-elt", "oracle-elt-erreurs", "oracle-elt-syntaxe-26ai", "oracle-elt-patterns",
-  "oracle-elt-performance", "oracle-elt-plsql", "oracle-elt-dictionnaire",
+meta = { description = "Qwen3.8 27B (OpenRouter) + tools MCP vivia", toolIds = [
+  "server:mcp:vivia",
+], skillIds = [
+  "oracle-elt",
+  "oracle-elt-erreurs",
+  "oracle-elt-syntaxe-26ai",
+  "oracle-elt-patterns",
+  "oracle-elt-performance",
+  "oracle-elt-plsql",
+  "oracle-elt-dictionnaire",
 ] }
 params = { function_calling = "native" }
 

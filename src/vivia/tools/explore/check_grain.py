@@ -4,6 +4,7 @@ from vivia.oracle import client
 from vivia.oracle import format as fmt
 from vivia.oracle.identifiers import ResolutionError, ensure_identifier, resolve
 from vivia.oracle.sql_guard import RejectedSQL, ensure_safe_fragment
+from vivia.tools.explore import queries
 
 _FILTER_REQUIRED_ABOVE = 1_000_000  # num_rows au-dela duquel un filtre devient obligatoire
 
@@ -23,25 +24,17 @@ def check_grain(table: str, colonnes_cle: list[str], filtre: str | None = None) 
     except (ResolutionError, ValueError, RejectedSQL) as err:
         return f"Erreur : {err}"
 
-    _, size = client.fetch(
-        "SELECT num_rows FROM all_tables WHERE owner = :o AND table_name = :t",
-        {"o": obj.schema, "t": obj.name},
-    )
+    _, size = client.fetch(queries.CHECK_GRAIN_NUM_ROWS, {"o": obj.schema, "t": obj.name})
     num_rows = size[0][0] if size and size[0][0] is not None else None
     if num_rows and num_rows > _FILTER_REQUIRED_ABOVE and not filtre:
-        return (
-            f"Erreur : {obj} fait ~{num_rows:,} lignes, un filtre est obligatoire "
-            f"au-dela de {_FILTER_REQUIRED_ABOVE:,}."
-        )
+        return fmt.too_many_rows(obj, num_rows, _FILTER_REQUIRED_ABOVE)
 
     where = f"WHERE {filtre}" if filtre else ""
-    _, counts = client.fetch(f"SELECT COUNT(*), COUNT(DISTINCT {keys}) FROM {obj} {where}")
+    _, counts = client.fetch(queries.CHECK_GRAIN_COUNTS.format(keys=keys, obj=obj, where=where))
     total, distinct = counts[0]
-    lines = [f"lignes : {total} — cles distinctes ({keys}) : {distinct}"]
-    if total != distinct:
-        cols, dups = client.fetch(
-            f"SELECT {keys}, COUNT(*) occurrences FROM {obj} {where} "
-            f"GROUP BY {keys} HAVING COUNT(*) > 1 FETCH FIRST 5 ROWS ONLY"
-        )
-        lines += ["", "### Exemples de doublons", fmt.markdown_table(cols, dups, limit=5)]
-    return "\n".join(lines)
+    if total == distinct:
+        return fmt.check_grain_report(keys, total, distinct)
+
+    dup_sql = queries.CHECK_GRAIN_DUPLICATES.format(keys=keys, obj=obj, where=where)
+    cols, dups = client.fetch(dup_sql)
+    return fmt.check_grain_report(keys, total, distinct, cols, dups)

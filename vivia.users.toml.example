@@ -1,0 +1,24 @@
+# Comptes et groupes : non commite (voir .gitignore), car mots de passe en clair.
+# Modele a copier : vivia.users.toml.example.
+
+# Premier compte cree => admin.
+[admin]
+name = "admin"
+email = "admin@vivia.local"
+password = "changeme123"
+
+[[users]]
+name = "Tester"
+email = "tester@vivia.local"
+password = "tester123"
+role = "user"
+groups = ["testers"]
+
+[[groups]]
+name = "testers"
+description = "Comptes de test, acces lecture seule au workspace"
+
+[groups.permissions]
+workspace = { models = false, knowledge = false, prompts = false, tools = false }
+chat = { file_upload = false, delete = true, edit = true, temporary = true }
+features = { web_search = false, image_generation = false, code_interpreter = false }

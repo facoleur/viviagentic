@@ -3,6 +3,7 @@
 import re
 
 from vivia.oracle.client import fetch
+from vivia.oracle.queries import RESOLVE_OWNERS
 
 _QUALIFIED = re.compile(r"^([A-Za-z0-9_$#]+)\.([A-Za-z0-9_$#]+)$")
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_$#]*$")
@@ -46,9 +47,7 @@ def resolve(name: str) -> ObjectName:
     schema, obj = parse(name)
     if schema:
         return ObjectName(schema, obj)
-    _, rows = fetch(
-        "SELECT DISTINCT owner FROM all_objects WHERE object_name = :name", {"name": obj}
-    )
+    _, rows = fetch(RESOLVE_OWNERS, {"name": obj})
     owners = sorted(r[0] for r in rows)
     if not owners:
         raise UnknownObject(obj)
