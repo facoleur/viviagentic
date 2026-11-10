@@ -7,7 +7,7 @@ Ollama et le serveur MCP restent sur le reseau interne du projet.
 ## Demarrage
 
 ```sh
-cp .env.example .env && $EDITOR .env   # WEBUI_SECRET_KEY, VIVIA_MODEL
+cp .env.example .env && $EDITOR .env   # WEBUI_SECRET_KEY, VIVIA_MODEL, ORACLE_DSN/USER/PASSWORD
 uv sync
 make up                                # pull du modele inclus (service ollama-pull)
 make configure                         # applique vivia.toml a Open WebUI
@@ -53,8 +53,12 @@ recoit que la question posee.
 
 ## Tools MCP
 
-`src/vivia/mcp.py` expose `now`, `calc`, `roll_dice` et `text_stats` en streamable-HTTP
-sur `http://mcp:8000/mcp`. Ajouter un tool = une fonction decoree `@mcp.tool`.
+`src/vivia/mcp/server.py` monte un sous-serveur FastMCP par categorie d'outils
+(`sanity.py`, `rendering.py`, `lineage.py`, `explore.py`, ...), sans namespace, en
+streamable-HTTP sur `http://mcp:8000/mcp`. La logique de chaque outil vit dans
+`src/vivia/tools/<categorie>/<outil>.py` (un fichier par outil) ; le module `mcp/<categorie>.py`
+ne fait que l'enregistrer (`@mcp.tool` ou `mcp.tool(...)`). `sanity.py` expose `now`, `calc`,
+`roll_dice` et `text_stats`, des outils jouets qui valident le mecanisme de tool call.
 L'image embarque le code : apres modification, `docker compose build mcp` puis `up -d`.
 
 ### Tools qui rendent une vue
@@ -62,7 +66,7 @@ L'image embarque le code : apres modification, `docker compose build mcp` puis `
 `chart`, `graph`, `sql_lineage` et `table` sont des MCP Apps : ils affichent une vue dans la conversation
 au lieu de renvoyer du texte. Le tool porte un `resourceUri` en `ui://`, le serveur sert le
 HTML correspondant en `text/html;profile=mcp-app`, et Open WebUI l'affiche dans une iframe
-sandboxee, sous le message. Les documents sont dans `src/vivia/ui.py`.
+sandboxee, sous le message. Les documents sont dans `src/vivia/tools/rendering/views.py`.
 
 - `chart` : barres groupees, lignes ou aires, axes a graduations rondes, survol, legende.
 - `graph` : graphe dispose par forces, noeuds deplacables, groupes colores, aretes dirigees.
@@ -149,14 +153,11 @@ d'evenement `openwebui/functions/phoenix_feedback.py` (installee par `make confi
 Open WebUI 0.10+) recoit `feedback.created` et `feedback.updated`, relit le vote et l'envoie
 a Phoenix. Le filtre derivant ses identifiants par hachage de (projet, utilisateur,
 `chat_id`, `message_id`), la fonction rejoue ce calcul sans etat partage ;
-`tests/test_annotate.py` echoue si les deux divergent, et `project_name` doit etre le meme
-dans les valves des deux fonctions. Un vote donne avant que le tour soit exporte est
+`tests/test_phoenix_feedback.py` echoue si les deux divergent, et `project_name` doit etre
+le meme dans les valves des deux fonctions. Un vote donne avant que le tour soit exporte est
 renvoye toutes les 5 s (6 essais). `identifier` vaut l'id du feedback : changer son vote ou
-ajouter un commentaire met a jour l'annotation au lieu d'en empiler une.
-
-`make annotate` (`src/vivia/annotate.py`) rattrape les votes existants (anterieurs a la
-fonction, ou donnes pendant un arret de Phoenix) avec la meme logique, lue dans le meme
-fichier. Un vote dont le tour n'a jamais ete trace est signale comme introuvable.
+ajouter un commentaire met a jour l'annotation au lieu d'en empiler une. Phoenix est suppose
+toujours actif : il n'y a pas de rattrapage pour des votes donnes pendant un arret.
 
 ### Latence
 
@@ -166,6 +167,31 @@ Les evenements de role, d'usage ou d'ouverture d'item n'en sont pas un. OpenInfe
 pas de convention de TTFT, l'attribut reste dans le namespace `openwebui`. Sans streaming,
 ou avant Open WebUI 0.12 (pas de hook `request`, donc pas de debut d'appel), il est absent
 plutot qu'estime.
+
+## Exploration Oracle
+
+`src/vivia/mcp/explore.py` expose 8 outils de lecture du DWH Oracle (compte lecture seule) :
+`compile_sql`, `describe_table`, `search_objects`, `run_select`, `check_grain`, `column_stats`,
+`find_usages`, `get_source`. La connexion (`src/vivia/oracle/client.py`, `python-oracledb` en
+mode thin, pas de client Oracle a installer) lit `ORACLE_DSN`, `ORACLE_USER`, `ORACLE_PASSWORD`
+(obligatoires), `ORACLE_CALL_TIMEOUT_MS` et `ORACLE_MAX_ROWS` (optionnels) dans l'environnement.
+
+Aucun outil n'a besoin de plus que `SELECT` : pas d'`EXPLAIN PLAN`, pas de DDL/DML, pas
+d'AWR/ASH/Diagnostics Pack. `compile_sql` et `run_select` valident le SQL libre par `sqlglot`
+(dialecte `oracle`, une seule instruction `SELECT`/`WITH`) avant toute execution, templates
+`#NOM#` masques puis restaures (`lineage.mask_templates`, partage avec le lineage SQL). Les
+privileges optionnels (`DBMS_STATS.CONVERT_RAW_VALUE` pour `column_stats`, visibilite
+d'`ALL_DEPENDENCIES`/`ALL_SOURCE` pour `find_usages`/`get_source`) se degradent proprement,
+sans jamais faire planter l'outil.
+
+```sh
+docker compose -f docker/oracle-test/docker-compose.yml up -d   # Oracle Free, schemas zone+type
+ORACLE_DSN=localhost:1521/FREEPDB1 ORACLE_USER=AGENT ORACLE_PASSWORD=Welcome_1 \
+  uv run --group dev --group ops pytest tests/test_oracle_explore.py
+```
+
+Sans ce conteneur, `tests/test_oracle_explore.py` se saute proprement (`unittest.SkipTest`) ;
+`test_sql_guard.py` et `test_oracle_identifiers.py` tournent sans base.
 
 ## Lineage SQL
 

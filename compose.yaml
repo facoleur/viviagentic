@@ -15,7 +15,11 @@ services:
     volumes: ["open-webui:/app/backend/data"]
     # Test repris de l'image ; start_period couvre le warm-up (migrations + embeddings).
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health | jq -ne 'input.status == true'"]
+      test:
+        [
+          "CMD-SHELL",
+          "curl -sf http://localhost:8080/health | jq -ne 'input.status == true'",
+        ]
       start_period: 120s
       interval: 15s
     depends_on: [ollama]
@@ -32,13 +36,23 @@ services:
     environment:
       OLLAMA_HOST: http://ollama:11434
       MODELS: ${VIVIA_MODEL:-qwen3:8b} ${VIVIA_EMBED_MODEL:-nomic-embed-text}
-    entrypoint: ["sh", "-c", 'for m in $$MODELS; do until ollama pull "$$m"; do sleep 2; done; done']
+    entrypoint:
+      [
+        "sh",
+        "-c",
+        'for m in $$MODELS; do until ollama pull "$$m"; do sleep 2; done; done',
+      ]
     depends_on: [ollama]
     restart: "no"
 
   mcp:
-    build: {context: ., dockerfile: docker/mcp.Dockerfile}
+    build: { context: ., dockerfile: docker/mcp.Dockerfile }
+    environment:
+      ORACLE_DSN: ${ORACLE_DSN:?set it in .env}
+      ORACLE_USER: ${ORACLE_USER:?set it in .env}
+      ORACLE_PASSWORD: ${ORACLE_PASSWORD:?set it in .env}
     restart: unless-stopped
+    extra_hosts: ["host.docker.internal:host-gateway"]
 
   # UI sur la loopback uniquement, jamais exposée hors du laptop.
   phoenix:

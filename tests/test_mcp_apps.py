@@ -11,8 +11,8 @@ import unittest
 
 from fastmcp import Client
 
-from vivia import ui
 from vivia.mcp import mcp
+from vivia.tools.rendering import views
 
 # Valeurs imposees par `open_webui/utils/mcp/apps.py`.
 APP_MIME_TYPE = "text/html;profile=mcp-app"
@@ -25,9 +25,9 @@ APPS = {
     "table": "ui://vivia/table.html",
 }
 DOCUMENTS = {
-    "ui://vivia/chart.html": ui.CHART_HTML,
-    "ui://vivia/graph.html": ui.GRAPH_HTML,
-    "ui://vivia/table.html": ui.TABLE_HTML,
+    "ui://vivia/chart.html": views.CHART_HTML,
+    "ui://vivia/graph.html": views.GRAPH_HTML,
+    "ui://vivia/table.html": views.TABLE_HTML,
 }
 
 
@@ -109,7 +109,7 @@ class DocumentTests(unittest.TestCase):
                     "ui/notifications/size-changed",
                 ):
                     self.assertIn(message, html)
-                self.assertIn(ui.PROTOCOL_VERSION, html)
+                self.assertIn(views.PROTOCOL_VERSION, html)
                 self.assertNotIn("__PROTOCOL__", html)
 
     def test_height_is_measured_on_the_body(self):

@@ -1,0 +1,8 @@
+services:
+  oracle-test:
+    image: gvenzl/oracle-free:23-slim
+    environment:
+      ORACLE_PASSWORD: Welcome_1
+    ports: ["1521:1521"]
+    volumes:
+      - ./init.sql:/container-entrypoint-initdb.d/init.sql:ro

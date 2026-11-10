@@ -19,6 +19,12 @@ _MASK = re.compile(r"TPL#(\w+)#")
 _WRITES = exp.Insert | exp.Merge | exp.Update | exp.Create
 
 
+def mask_templates(sql: str) -> str:
+    """Remplace `#NOM#` par `TPL#NOM#`, un identifiant Oracle valide, pour que sqlglot le
+    traite comme un nom plutot que de bloquer sur `#` en premiere position."""
+    return _TPL.sub(r"TPL#\1#", sql)
+
+
 def _unmask(name: str) -> str:
     return _MASK.sub(r"#\1#", name).upper()
 
@@ -61,9 +67,9 @@ def lineage(
     (lus comme `CREATE TABLE <target> AS SELECT ...`) ; sans lui, ils sont ignores.
     """
     edges = {}
-    for stmt in sqlglot.parse(_TPL.sub(r"TPL#\1#", sql), read="oracle"):
+    for stmt in sqlglot.parse(mask_templates(sql), read="oracle"):
         if target and isinstance(stmt, exp.Query):
-            table = exp.to_table(_TPL.sub(r"TPL#\1#", target), dialect="oracle")
+            table = exp.to_table(mask_templates(target), dialect="oracle")
             stmt = exp.Create(this=table, kind="TABLE", expression=stmt)
         if not isinstance(stmt, _WRITES):
             continue
