@@ -245,24 +245,33 @@ def _node(name: str) -> str:
     return re.sub(r"\W", "_", name)
 
 
-def dependencies_graph(root: str, edges: list, zones: dict, complete: bool) -> str:
-    """Graphe Mermaid source --> cible, zone de chaque source dans le libelle du noeud."""
+def dependencies_graph(root: str, edges: list, zones: dict, pending: dict[str, int]) -> str:
+    """Graphe Mermaid source --> cible ; chaque branche non remontee porte son nombre de sources."""
     if not edges:
         return f"Aucune source declaree dans TRAC_DATA pour {root}."
-    labels = [f'  {_node(n)}["{n} ({z})"]' for n, z in zones.items()]
-    arrows = [f"  {_node(s)} --> {_node(t)}" for s, t in edges]
-    sda = sorted(n for n, z in zones.items() if z == "SDA")
+
+    def label(name: str, zone: str) -> str:
+        if zone == "SDA":
+            return f"{name} (SDA, source)"
+        if name not in pending:
+            return f"{name} ({zone})"
+        kind = ", table P" if name.startswith("P_") else ""
+        return f"{name} ({zone}{kind}, {pending[name]} sources)"
+
     lines = [
-        f"## Sources de {root} (TRAC_DATA, jusqu'a SDA)",
+        f"## Sources de {root} (TRAC_DATA)",
         "```mermaid",
         "graph LR",
-        *labels,
-        *arrows,
+        *(f'  {_node(n)}["{label(n, z)}"]' for n, z in zones.items()),
+        *(f"  {_node(s)} --> {_node(t)}" for s, t in edges),
         "```",
-        f"Sources SDA atteintes : {', '.join(sda) or 'aucune'}.",
     ]
-    if not complete:
-        lines.append("Profondeur maximale atteinte : graphe incomplet.")
+    branches = [f"{n} ({k})" for n, k in pending.items() if k]
+    if branches:
+        lines.append(
+            f"Branches non remontees : {', '.join(branches)}. "
+            "Rappeler get_dependencies sur celle qui compte."
+        )
     return truncate("\n".join(lines))
 
 

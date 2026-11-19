@@ -13,9 +13,10 @@ from vivia.tools.explore.search_operations import search_operations
 SQL = "SELECT ID_TIERS,\n  NVL(SEGMENT, 'X') SEGMENT\nFROM SDAINT.V_TIERS"
 OP = ("SDE_LOAD", "P_TIERS", 1, "Alimente P_TIERS", "SDETRG.P_TIERS")
 TRAC = {
-    "F_OPE": [("SDE", "V_P_TIERS$CV"), ("SDE", "V_P_FLUX")],
-    "P_TIERS": [("SDA", "V_TIERS")],
-    "P_FLUX": [("SDA", "V_TIERS"), ("SDE", "P_FLUX")],  # boucle sur elle-meme
+    "F_OPE": [("SDE", "V_P_TIERS$CV"), ("SDE", "V_W_AGG"), ("SDA", "COMPTE")],
+    "P_TIERS": [("SDA", "V_TIERS"), ("SDE", "P_ADRESSE")],
+    "W_AGG": [("SDE", "V_W_AGG"), ("SDE", "W_BASE")],  # boucle sur elle-meme
+    "W_BASE": [("SDA", "MOUVEMENT")],
 }
 
 
@@ -54,17 +55,21 @@ class OperationToolsTests(unittest.TestCase):
         self.assertIn("| SDE_LOAD | P_TIERS | 1 | Alimente P_TIERS | SDETRG.P_TIERS | 3 |", result)
         self.assertIn("chaine IN (:chaine_0, :chaine_1)", self.calls[-1][0])
 
-    def test_dependencies_graph_climbs_to_sda_from_a_bare_table_name(self):
+    def test_one_level_by_default_with_the_size_of_each_branch(self):
         result = get_dependencies("sdetrg.f_ope")
-        self.assertIn('P_TIERS["P_TIERS (SDE)"]', result)
+        self.assertIn('P_TIERS["P_TIERS (SDE, table P, 2 sources)"]', result)
+        self.assertIn('W_AGG["W_AGG (SDE, 2 sources)"]', result)
+        self.assertIn('COMPTE["COMPTE (SDA, source)"]', result)
         self.assertIn("P_TIERS --> F_OPE", result)
-        self.assertIn("TIERS --> P_TIERS", result)
-        self.assertIn("TIERS --> P_FLUX", result)
-        self.assertIn("Sources SDA atteintes : TIERS.", result)
-        self.assertNotIn("incomplet", result)
-        # Une source SDA n'est pas remontee ; chaque cible n'est lue qu'une fois.
-        targets = [p["target"] for s, p in self.calls if s == queries.TRAC_DATA_SOURCES]
-        self.assertEqual(targets, ["F_OPE", "P_TIERS", "P_FLUX"])
+        self.assertNotIn("W_BASE", result)
+        self.assertIn("Branches non remontees : P_TIERS (2), W_AGG (2).", result)
+
+    def test_several_levels_stop_at_p_tables_and_sda(self):
+        result = get_dependencies("F_OPE", niveaux=5)
+        self.assertIn("W_BASE --> W_AGG", result)
+        self.assertIn("MOUVEMENT --> W_BASE", result)
+        self.assertNotIn("P_ADRESSE", result)  # table P non remontee
+        self.assertIn("Branches non remontees : P_TIERS (2).", result)
 
     def test_view_names_are_reduced_to_their_table(self):
         self.assertEqual(table_name("SDEINT.V_P_FLUX$CV"), "P_FLUX")
