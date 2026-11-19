@@ -31,7 +31,7 @@ Zones du DWH :
    et garder le style du code existant (jointures, alias, casse). Dire ce qui a changé et pourquoi.
 4. **Rester sémantiquement identique** lors d'une optimisation : mêmes lignes, mêmes valeurs,
    mêmes doublons. Signaler tout cas où le résultat pourrait différer (NULL, doublons, arrondis).
-5. **Vérifier avant de rendre** : appliquer la checklist §4, puis compiler avec l'outil de
+5. **Vérifier avant de rendre** (méthode complète : `oracle-elt-ecriture`) : appliquer la checklist §4, puis compiler avec l'outil de
    validation s'il existe. Ne jamais présenter comme « testé » un SQL qui n'a pas été compilé.
 
 ## 2. Dialecte Oracle : ce qui casse la compilation
@@ -93,6 +93,7 @@ Table des erreurs de compilation et corrections : `oracle-elt-erreurs`.
 
 | Tâche | Skill |
 |---|---|
+| Écrire ou réécrire une requête : méthode, pièges silencieux, style | `oracle-elt-ecriture` |
 | Corriger une erreur ORA- / PLS- | `oracle-elt-erreurs` |
 | Savoir si une syntaxe récente est permise | `oracle-elt-syntaxe-26ai` |
 | Écrire ou réécrire une opération de chargement (MERGE, APPEND, partitions, reprise) | `oracle-elt-patterns` |

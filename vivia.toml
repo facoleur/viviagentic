@@ -100,6 +100,7 @@ meta = { description = "Qwen3 8B + tools MCP vivia", toolIds = [
   "server:mcp:vivia",
 ], skillIds = [
   "oracle-elt",
+  "oracle-elt-ecriture",
   "oracle-elt-erreurs",
   "oracle-elt-syntaxe-26ai",
   "oracle-elt-patterns",
@@ -119,6 +120,7 @@ meta = { description = "Qwen3.8 27B (OpenRouter) + tools MCP vivia", toolIds = [
   "server:mcp:vivia",
 ], skillIds = [
   "oracle-elt",
+  "oracle-elt-ecriture",
   "oracle-elt-erreurs",
   "oracle-elt-syntaxe-26ai",
   "oracle-elt-patterns",
@@ -146,6 +148,7 @@ description = "Assistant DWH Oracle : tools MCP vivia + skills oracle-elt"
 toolIds = ["server:mcp:vivia"]
 skillIds = [
   "oracle-elt",
+  "oracle-elt-ecriture",
   "oracle-elt-erreurs",
   "oracle-elt-syntaxe-26ai",
   "oracle-elt-patterns",
