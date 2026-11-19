@@ -1,0 +1,46 @@
+# Table {{ table }}
+
+Commentaire Oracle : {{ commentaire or "aucun" }}
+Clé primaire : {{ pk | join(", ") or "non déclarée" }}
+Profil calculé sur {{ echantillon }} lignes.
+
+## Colonnes (nom | type | taux de null | cardinalité | commentaire)
+{% for c in colonnes %}
+- {{ c.nom }} | {{ c.type }} | {{ c.taux_null }} | {{ c.cardinalite }} | {{ c.commentaire or "" }}
+{% endfor %}
+
+## Exemples de lignes
+{% for row in exemples %}
+- {% for k, v in row.items() %}{{ k }}={{ v }}; {% endfor %}
+
+{% endfor %}
+
+## Glossaire
+{% for k, v in glossaire.items() %}
+- {{ k }} : {{ v }}
+{% else %}
+Aucune entrée pertinente.
+{% endfor %}
+
+## Tables sources (lues par le flux producteur)
+{% for src, cols in sources.items() %}
+### {{ src }}
+{% for c in cols %}
+- {{ c }}
+{% endfor %}
+{% else %}
+Aucune source déclarée (chargement brut).
+{% endfor %}
+
+## Flux
+Producteurs : {% for p in producteurs %}{{ p.flux }} ({{ p.frequence or "fréquence inconnue" }}) {% endfor %}
+
+Consommateurs : {{ consommateurs | join(", ") or "aucun" }}
+
+## SQL des opérations des flux producteurs, dans l'ordre
+{% for op in operations %}
+### {{ op.flux }}, opération {{ op.ordre }} -> {{ op.table_cible }}
+```sql
+{{ op.sql }}
+```
+{% endfor %}

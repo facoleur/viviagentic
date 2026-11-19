@@ -229,6 +229,26 @@ directement utilisable par le tool `graph`, et `to_mermaid(edges, columns)` le b
 - **Markdown** : `--md` ecrit un bloc ` ```mermaid ` (flowchart gauche-droite, une boite par table en
   mode colonne), rendu nativement par Open WebUI, GitHub ou VS Code, sans rien charger du web.
 
+## Retro-doc
+
+Un JSON par table SDA/SDE strategique, dans `artifacts/retrodoc/doc/`. Le code collecte les faits
+(dictionnaire, profil sur echantillon, flux via `V_TRAC_DATA`, SQL des flux producteurs,
+frequence via `V_M_FLOWDATA`) ; le LLM ne redige que la prose (description, grain, regles de
+calcul, origine des colonnes).
+
+```bash
+uv run vivia-retrodoc select -n 200       # selection.json : tables lues par le plus de flux
+uv run vivia-retrodoc run -j 2            # documente la selection (ou : run SDETRG.P_TIERS)
+```
+
+- Noms des vues du framework : `src/vivia/retrodoc/sql.py`. Prompts : `prompts/*.j2`.
+- LLM : `RETRODOC_LLM_URL` (defaut Ollama `http://localhost:11434/v1`), `RETRODOC_MODEL`. Avec
+  Ollama, fixer `OLLAMA_CONTEXT_LENGTH` (ex. 131072) et `OLLAMA_NUM_PARALLEL` >= `-j`.
+- `glossaire.json` (`{"ACRONYME": "definition"}`) : seuls les termes presents dans la table et son
+  SQL sont donnes au LLM.
+- Corrections humaines : `overrides/SCHEMA.TABLE.json`, fusionne par-dessus le resultat.
+- Le LLM n'est rappele que si le SQL, le schema, les sources ou le glossaire changent.
+
 ## Tests
 
 ```sh
