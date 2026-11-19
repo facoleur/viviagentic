@@ -17,10 +17,10 @@ FLOWS = _all_zones("V_M_FLOWDATA", "chain_name, flow_name, load_frequency")
 
 # Toutes les operations des flux qui ecrivent dans :t (tables intermediaires comprises).
 OPERATIONS = f"""
-    WITH ops AS ({_all_zones("V_M_OPERATION", "chaine, flux, ordre, table_cible, sql_text")})
-    SELECT chaine, flux, ordre, table_cible, sql_text FROM ops
+    WITH ops AS ({_all_zones("V_M_OPERATION", "chaine, flux, operation_nr, table_cible, sql_text")})
+    SELECT chaine, flux, operation_nr, table_cible, sql_text FROM ops
     WHERE (chaine, flux) IN (SELECT chaine, flux FROM ops WHERE table_cible = :t)
-    ORDER BY chaine, flux, ordre
+    ORDER BY chaine, flux, operation_nr
 """
 
 # Vue -> table qu'elle expose (les flux lisent souvent SDEINT.V_X plutot que SDETRG.X).

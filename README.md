@@ -186,7 +186,7 @@ plutot qu'estime.
 
 `src/vivia/mcp/explore.py` expose 8 outils de lecture du DWH Oracle (compte lecture seule) :
 `compile_sql`, `describe_table`, `search_objects`, `run_select`, `check_grain`, `column_stats`,
-`find_usages`, `get_source`. La connexion (`src/vivia/oracle/client.py`, `python-oracledb` en
+`find_usages`, `get_source`, et d'autres. La connexion (`src/vivia/oracle/client.py`, `python-oracledb` en
 mode thin, pas de client Oracle a installer) lit `ORACLE_DSN`, `ORACLE_USER`, `ORACLE_PASSWORD`
 (obligatoires), `ORACLE_CALL_TIMEOUT_MS` et `ORACLE_MAX_ROWS` (optionnels) dans l'environnement.
 
@@ -197,6 +197,13 @@ d'AWR/ASH/Diagnostics Pack. `compile_sql` et `run_select` valident le SQL libre 
 privileges optionnels (`DBMS_STATS.CONVERT_RAW_VALUE` pour `column_stats`, visibilite
 d'`ALL_DEPENDENCIES`/`ALL_SOURCE` pour `find_usages`/`get_source`) se degradent proprement,
 sans jamais faire planter l'outil.
+
+Operations ELT, lues dans les vues `V_M_OPERATION` des schemas `*INT` (colonnes dans
+`tools/explore/queries.py`, `OPERATION_NR` unique dans un flux seulement) :
+`get_operation` (SQL complet d'un flux ou d'une operation), `search_operations` (nom de flux,
+description ou SQL, avec les lignes trouvees), `list_operations` (operations d'une ou plusieurs
+chaines). `get_dependencies` remonte `V_TRAC_DATA` recursivement, vues `*INT` ramenees a leur
+table, jusqu'aux tables sans source declaree (en general SDA).
 
 ```sh
 docker compose -f docker/oracle-test/docker-compose.yml up -d   # Oracle Free, schemas zone+type

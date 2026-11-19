@@ -9,9 +9,12 @@ from vivia.tools.explore.compare_sql import compare_sql
 from vivia.tools.explore.compile_sql import compile_sql
 from vivia.tools.explore.describe_table import describe_table
 from vivia.tools.explore.find_usages import find_usages
+from vivia.tools.explore.get_operation import get_operation
 from vivia.tools.explore.get_source import get_source
+from vivia.tools.explore.list_operations import list_operations
 from vivia.tools.explore.run_select import run_select
 from vivia.tools.explore.search_objects import search_objects
+from vivia.tools.explore.search_operations import search_operations
 
 
 class OracleExploreTests(unittest.TestCase):
@@ -137,3 +140,16 @@ class OracleExploreTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_get_operation_reads_the_int_view(self):
+        result = get_operation("P_TIERS")
+        self.assertIn("SDE_LOAD.P_TIERS op 1 -> `SDETRG.P_TIERS`", result)
+        self.assertIn("FROM SDAINT.V_TIERS", result)
+
+    def test_search_operations_finds_a_table_read_in_the_sql(self):
+        result = search_operations("SDAINT.V_MOUVEMENT", dans="sql")
+        self.assertIn("P_FLUX", result)
+
+    def test_list_operations_of_a_chain(self):
+        result = list_operations(["SDE_LOAD"])
+        self.assertIn("| SDE_LOAD | P_FLUX | 2 |", result)

@@ -1,7 +1,8 @@
-"""Lineage declaratif : TRAC_DATA dit, par table cible, quelles tables source sont requises.
+"""Lignage amont declaratif : TRAC_DATA dit, par table cible, quelles tables source sont requises.
 
-Contrairement a `find_usages` (qui cherche dans le code), c'est une donnee du framework
-ETL lui-meme : fiable, mais limitee aux dependances qu'il enregistre (pas les jointures).
+Recursif : chaque source est remontee a son tour (vue *INT ramenee a sa table *TRG) jusqu'aux
+tables sans source declaree, en general les ingestions SDA. Limite aux dependances que le
+framework enregistre (pas les colonnes ni les jointures).
 """
 
 from typing import Annotated
@@ -10,8 +11,9 @@ from pydantic import Field
 
 from vivia.oracle import client
 from vivia.oracle import format as fmt
-from vivia.oracle.glossary import ZONES
 from vivia.tools.explore import queries
+
+_MAX_DEPTH = 15
 
 
 def get_dependencies(
@@ -22,14 +24,33 @@ def get_dependencies(
             "(ex. 'SDETRG.P_TIERS')."
         ),
     ],
+    recursif: Annotated[
+        bool,
+        Field(description="True : remonte jusqu'aux sources initiales. False : un seul niveau."),
+    ] = True,
 ) -> str:
-    """Tables source necessaires a `table_cible`, declarees dans TRAC_DATA (une ligne par source).
+    """Tables source de `table_cible` declarees dans TRAC_DATA, en arbre jusqu'aux sources SDA.
 
-    Exemple : get_dependencies("SDETRG.P_TIERS")
+    Exemple : get_dependencies("DMDTRG.F_OPERATION"), ou get_dependencies("...", recursif=False)
     """
-    per_zone = " UNION ALL ".join(
-        queries.TRAC_DATA_BY_ZONE.format(schema=f"{zone}TRG") for zone in ZONES
-    )
-    sql = queries.TRAC_DATA_DEPENDENCIES.format(unioned=per_zone)
-    _, rows = client.fetch(sql, {"cible": table_cible.strip().upper()})
-    return fmt.dependencies_report(table_cible, rows)
+    _, views = client.fetch(queries.VIEW_TABLES, max_rows=100_000)
+    tables_of: dict[str, list[str]] = {}
+    for view, table in views:
+        tables_of.setdefault(view, []).append(table)
+
+    lines: list[str] = []
+    seen = {table_cible.strip().upper()}
+
+    def walk(table: str, depth: int) -> None:
+        _, rows = client.fetch(queries.TRAC_DATA_SOURCES, {"cible": table})
+        for chaine, flux, source in rows:
+            bases = tables_of.get(source, [source])
+            todo = [b for b in bases if b not in seen]
+            lines.append(fmt.dependency_line(depth, source, bases, chaine, flux, bool(todo)))
+            seen.update(todo)
+            if recursif and depth < _MAX_DEPTH:
+                for base in todo:
+                    walk(base, depth + 1)
+
+    walk(table_cible.strip().upper(), 0)
+    return fmt.dependencies_report(table_cible, lines)

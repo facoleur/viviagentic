@@ -19,18 +19,35 @@ COMPILE_SQL_PROBE = "SELECT * FROM (\n{sql}\n) WHERE 1 = 0 FETCH FIRST 0 ROWS ON
 
 DISTINCT_VALUES = "SELECT DISTINCT {col} FROM {obj} ORDER BY {col} FETCH FIRST {limit} ROWS ONLY"
 
-# Une ligne par (table cible, table source) declaree par le framework ETL, par zone (TRAC_DATA
-# existe une fois par schema *TRG, comme M_OPERATION) ; {schema} = "SDATRG", "SDETRG", etc.
-TRAC_DATA_BY_ZONE = (
-    "SELECT chaine, flux, table_source FROM {schema}.TRAC_DATA WHERE table_cible = :cible"
+# Vues du framework ETL, une par zone dans le schema *INT : seul endroit a adapter si les noms
+# de colonnes de la prod different. OPERATION_NR n'est unique que dans un flux.
+ZONES = ("SDA", "SDE", "DMD")
+
+
+def _all_zones(view: str, columns: str) -> str:
+    return " UNION ALL ".join(f"SELECT {columns} FROM {zone}INT.{view}" for zone in ZONES)
+
+
+OPERATION_COLUMNS = "chaine, flux, operation_nr, operation_description, table_cible"
+
+# {cols} : colonnes a ramener (dont sql_text ou un calcul dessus) ; {where} : filtre du tool.
+OPERATIONS = (
+    f"SELECT {{cols}} FROM ({_all_zones('V_M_OPERATION', OPERATION_COLUMNS + ', sql_text')}) "
+    "WHERE {where} ORDER BY chaine, flux, operation_nr"
 )
-TRAC_DATA_DEPENDENCIES = "SELECT * FROM ({unioned}) ORDER BY chaine, flux"
 
-FIND_OPERATION_SCHEMAS = "SELECT DISTINCT owner FROM all_tables WHERE table_name = 'M_OPERATION'"
+# Une ligne par (flux, table cible, table source) declaree par le framework.
+TRAC_DATA_SOURCES = (
+    f"SELECT chaine, flux, table_source FROM "
+    f"({_all_zones('V_TRAC_DATA', 'chaine, flux, table_cible, table_source')}) "
+    "WHERE table_cible = :cible ORDER BY chaine, flux, table_source"
+)
 
-FIND_OPERATION_IN_SCHEMA = (
-    "SELECT '{schema}' owner, sql_text FROM {schema}.M_OPERATION "
-    "WHERE flux = :flux AND id_operation = :operation"
+# Vue -> table(s) qu'elle lit : les flux lisent SDEINT.V_X, ecrit dans SDETRG.X.
+VIEW_TABLES = (
+    "SELECT owner || '.' || name, referenced_owner || '.' || referenced_name "
+    "FROM all_dependencies WHERE type = 'VIEW' AND referenced_type = 'TABLE' "
+    "AND owner LIKE '%INT'"
 )
 
 DESCRIBE_TABLE_COLUMNS = """

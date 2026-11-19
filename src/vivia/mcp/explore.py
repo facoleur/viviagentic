@@ -11,10 +11,13 @@ from vivia.tools.explore.distinct_values import distinct_values as _distinct_val
 from vivia.tools.explore.find_usages import find_usages as _find_usages
 from vivia.tools.explore.find_verified_query import find_verified_query as _find_verified_query
 from vivia.tools.explore.get_dependencies import get_dependencies as _get_dependencies
+from vivia.tools.explore.get_operation import get_operation as _get_operation
 from vivia.tools.explore.get_source import get_source as _get_source
 from vivia.tools.explore.glossary import glossary as _glossary
+from vivia.tools.explore.list_operations import list_operations as _list_operations
 from vivia.tools.explore.run_select import run_select as _run_select
 from vivia.tools.explore.search_objects import search_objects as _search_objects
+from vivia.tools.explore.search_operations import search_operations as _search_operations
 
 mcp = FastMCP("vivia-explore")
 
@@ -31,3 +34,6 @@ mcp.tool(_distinct_values, name="distinct_values")
 mcp.tool(_get_dependencies, name="get_dependencies")
 mcp.tool(_glossary, name="glossary")
 mcp.tool(_find_verified_query, name="find_verified_query")
+mcp.tool(_get_operation, name="get_operation")
+mcp.tool(_search_operations, name="search_operations")
+mcp.tool(_list_operations, name="list_operations")

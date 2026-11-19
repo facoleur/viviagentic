@@ -238,9 +238,52 @@ def distinct_values_report(col: str, rows: list[tuple], limit: int) -> str:
 # --- get_dependencies ----------------------------------------------------------------------------
 
 
-def dependencies_report(table_cible: str, rows: list[tuple]) -> str:
-    if not rows:
+def dependency_line(depth, source, bases, chaine, flux, new: bool) -> str:
+    table = f" = {', '.join(f'`{b}`' for b in bases)}" if bases != [source] else ""
+    seen = "" if new else " — deja remontee plus haut"
+    return f"{'  ' * depth}- `{source}`{table} (chaine {chaine}, flux {flux}){seen}"
+
+
+def dependencies_report(table_cible: str, lines: list[str]) -> str:
+    if not lines:
         return f"Aucune dependance declaree dans TRAC_DATA pour {table_cible}."
-    lines = [f"## Sources necessaires a {table_cible}"]
-    lines += [f"- `{source}` (chaine {chaine}, flux {flux})" for chaine, flux, source in rows]
-    return "\n".join(lines)
+    return truncate("\n".join([f"## Sources necessaires a {table_cible}", *lines]))
+
+
+# --- operations --------------------------------------------------------------------------------
+
+
+def _operation_title(chaine, flux, nr, description, cible) -> str:
+    return f"{chaine}.{flux} op {nr} -> `{cible}`" + (f" — {description}" if description else "")
+
+
+def operations_sql(flux: str, rows: list[tuple]) -> str:
+    """SQL complet, non tronque : c'est ce que l'agent vient lire."""
+    if not rows:
+        return f"Aucune operation pour le flux {flux}. Utiliser search_operations."
+    return "\n\n".join(
+        f"### {_operation_title(*row[:5])}\n```sql\n{row[5] or ''}\n```" for row in rows
+    )
+
+
+def search_operations_report(texte: str, rows: list[tuple], limit: int) -> str:
+    if not rows:
+        return f"Aucune operation ne contient « {texte} »."
+    lines = [f"## Operations contenant « {texte} »"]
+    for *head, sql in rows:
+        lines.append(f"- {_operation_title(*head)}")
+        hits = [(i, ln) for i, ln in enumerate((sql or "").splitlines(), 1)]
+        hits = [(i, ln) for i, ln in hits if texte.upper() in ln.upper()]
+        lines += [f"  - l.{i} : `{ln.strip()[:160]}`" for i, ln in hits[:3]]
+        if len(hits) > 3:
+            lines.append(f"  - ... {len(hits) - 3} autres lignes")
+    if len(rows) == limit:
+        lines.append(f"\n(limite de {limit} atteinte : affiner `texte` ou `chaines`)")
+    return truncate("\n".join(lines))
+
+
+def list_operations_report(chaines: list[str], rows: list[tuple], limit: int) -> str:
+    if not rows:
+        return f"Aucune operation pour les chaines {', '.join(chaines)}."
+    columns = ["chaine", "flux", "op", "description", "table cible", "lignes SQL"]
+    return markdown_table(columns, rows, limit)
