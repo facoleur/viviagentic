@@ -1,7 +1,7 @@
 """Lecture des operations ELT (V_M_OPERATION des schemas *INT), partagee par les tools."""
 
 from vivia.oracle import client
-from vivia.tools.explore import queries
+from vivia.tools.explore import framework, queries
 
 
 def fetch_operations(
@@ -9,7 +9,9 @@ def fetch_operations(
 ) -> list[tuple]:
     """(chaine, flux, operation_nr, description, table_cible, `last_col`), filtres en AND."""
     sql = queries.OPERATIONS.format(
-        cols=f"{queries.OPERATION_COLUMNS}, {last_col}", where=" AND ".join(where) or "1 = 1"
+        cols=f"{queries.OPERATION_COLUMNS}, {last_col}",
+        source=framework.union(framework.OPERATIONS, f"{queries.OPERATION_COLUMNS}, sql_text"),
+        where=" AND ".join(where) or "1 = 1",
     )
     return client.fetch(sql, params, max_rows=max_rows)[1]
 

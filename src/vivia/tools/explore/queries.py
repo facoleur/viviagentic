@@ -19,29 +19,18 @@ COMPILE_SQL_PROBE = "SELECT * FROM (\n{sql}\n) WHERE 1 = 0 FETCH FIRST 0 ROWS ON
 
 DISTINCT_VALUES = "SELECT DISTINCT {col} FROM {obj} ORDER BY {col} FETCH FIRST {limit} ROWS ONLY"
 
-# Vues du framework ETL, une par zone dans le schema *INT : seul endroit a adapter si les noms
-# de colonnes de la prod different. OPERATION_NR n'est unique que dans un flux.
-# Pas de SDAINT : SDA ne porte que des sources, sans vue du framework.
-ZONES = ("SDE", "DMD")
-
-
-def all_zones(view: str, columns: str) -> str:
-    return " UNION ALL ".join(f"SELECT {columns} FROM {zone}INT.{view}" for zone in ZONES)
-
+# Vues du framework ETL ({source} : `framework.union`, schemas decouverts). OPERATION_NR
+# n'est unique que dans un flux.
+VIEW_OWNERS = "SELECT owner FROM all_views WHERE view_name = :view ORDER BY owner"
 
 OPERATION_COLUMNS = "chaine, flux, operation_nr, operation_description, table_cible"
 
 # {cols} : colonnes a ramener (dont sql_text ou un calcul dessus) ; {where} : filtre du tool.
-OPERATIONS = (
-    f"SELECT {{cols}} FROM ({all_zones('V_M_OPERATION', OPERATION_COLUMNS + ', sql_text')}) "
-    "WHERE {where} ORDER BY chaine, flux, operation_nr"
-)
+OPERATIONS = "SELECT {cols} FROM ({source}) WHERE {where} ORDER BY chaine, flux, operation_nr"
 
-# Sources d'une table : zone de la source et son nom (vue ou table), cible = nom sans schema.
 TRAC_DATA_SOURCES = (
-    "SELECT DISTINCT source_application_code, source_name FROM "
-    f"({all_zones('V_TRAC_DATA', 'source_application_code, source_name, target_name')}) "
-    "WHERE target_name = :target ORDER BY source_name"
+    "SELECT DISTINCT source_name FROM ({source}) WHERE target_name LIKE :target "
+    "ORDER BY source_name"
 )
 
 # Vue -> table(s) qu'elle lit : les flux lisent SDEINT.V_X, ecrit dans SDETRG.X.

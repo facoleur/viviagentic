@@ -245,34 +245,12 @@ def _node(name: str) -> str:
     return re.sub(r"\W", "_", name)
 
 
-def dependencies_graph(root: str, edges: list, zones: dict, pending: dict[str, int]) -> str:
-    """Graphe Mermaid source --> cible ; chaque branche non remontee porte son nombre de sources."""
+def dependencies_graph(root: str, edges: list[tuple[str, str]]) -> str:
+    """Graphe Mermaid source --> cible."""
     if not edges:
-        return f"Aucune source declaree dans TRAC_DATA pour {root}."
-
-    def label(name: str, zone: str) -> str:
-        if zone == "SDA":
-            return f"{name} (SDA, source)"
-        if name not in pending:
-            return f"{name} ({zone})"
-        kind = ", table P" if name.startswith("P_") else ""
-        return f"{name} ({zone}{kind}, {pending[name]} sources)"
-
-    lines = [
-        f"## Sources de {root} (TRAC_DATA)",
-        "```mermaid",
-        "graph LR",
-        *(f'  {_node(n)}["{label(n, z)}"]' for n, z in zones.items()),
-        *(f"  {_node(s)} --> {_node(t)}" for s, t in edges),
-        "```",
-    ]
-    branches = [f"{n} ({k})" for n, k in pending.items() if k]
-    if branches:
-        lines.append(
-            f"Branches non remontees : {', '.join(branches)}. "
-            "Rappeler get_dependencies sur celle qui compte."
-        )
-    return truncate("\n".join(lines))
+        return f"Aucune source dans V_M_TRAC_DATA pour {root}."
+    arrows = [f"  {_node(s)} --> {_node(t)}" for s, t in dict.fromkeys(edges) if s != t]
+    return truncate("\n".join([f"## Sources de {root}", "```mermaid", "graph LR", *arrows, "```"]))
 
 
 # --- operations --------------------------------------------------------------------------------

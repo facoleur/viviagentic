@@ -51,9 +51,7 @@ class SemanticLayerOracleTests(unittest.TestCase):
         result = get_dependencies("F_OPERATION")
         self.assertIn("P_FLUX --> F_OPERATION", result)
         self.assertIn("P_TIERS --> F_OPERATION", result)
-        # Tables P : non remontees, meme avec plusieurs niveaux ; leur nombre de sources suffit.
-        self.assertIn("P_FLUX (SDE, table P, 1 sources)", result)
-        self.assertNotIn("MOUVEMENT", get_dependencies("F_OPERATION", niveaux=5))
+        self.assertIn("MOUVEMENT --> P_FLUX", get_dependencies("F_OPERATION", niveaux=2))
 
     def test_get_dependencies_on_a_root_table_is_empty(self):
         result = get_dependencies("TIERS")

@@ -198,15 +198,14 @@ privileges optionnels (`DBMS_STATS.CONVERT_RAW_VALUE` pour `column_stats`, visib
 d'`ALL_DEPENDENCIES`/`ALL_SOURCE` pour `find_usages`/`get_source`) se degradent proprement,
 sans jamais faire planter l'outil.
 
-Operations ELT, lues dans les vues `V_M_OPERATION` des schemas `*INT` (colonnes dans
-`tools/explore/queries.py`, `OPERATION_NR` unique dans un flux seulement) :
-`get_operation` (SQL d'un flux ou d'une operation, 200 000 caracteres au plus), `search_operations` (toujours dans le
-nom de flux, la description et le SQL, avec les lignes trouvees), `list_operations` (operations d'une ou plusieurs
-chaines). `get_dependencies("P_FLUX")` (nom de table seul) lit `V_TRAC_DATA` (`TARGET_NAME`,
-`SOURCE_NAME`, `SOURCE_APPLICATION_CODE`) et renvoie un graphe Mermaid des sources directes,
-chaque branche avec son nombre de sources : l'agent remonte celle qui compte. `niveaux` (1 a 10)
-sert l'analyse d'impact, et s'arrete aux sources SDA et aux tables `P_`. Une source
-`V_P_FLUX$CV` est ramenee a `P_FLUX`.
+Vues du framework (`V_M_OPERATION`, `V_M_TRAC_DATA`, `V_M_FLOWDATA`) : leurs schemas sont
+decouverts dans `ALL_VIEWS` (`tools/explore/framework.py`), rien n'est code en dur.
+`get_operation` (SQL d'un flux ou d'une operation, 200 000 caracteres au plus),
+`search_operations` (nom de flux, description et SQL, avec les lignes trouvees),
+`list_operations` (operations d'une ou plusieurs chaines). `get_dependencies("P_FLUX")` :
+`SELECT source_name ... WHERE target_name LIKE 'P_FLUX'`, puis la meme recherche pour chaque
+source trouvee, 3 niveaux au plus ; graphe Mermaid, noms de vue ramenes a la table
+(`V_P_FLUX$CV` -> `P_FLUX`).
 
 ```sh
 docker compose -f docker/oracle-test/docker-compose.yml up -d   # Oracle Free, schemas zone+type

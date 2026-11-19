@@ -4,7 +4,7 @@ import unittest
 from unittest import mock
 
 from vivia.oracle import client
-from vivia.tools.explore import queries
+from vivia.tools.explore import framework, queries
 from vivia.tools.explore.get_dependencies import get_dependencies, table_name
 from vivia.tools.explore.get_operation import get_operation
 from vivia.tools.explore.list_operations import list_operations
@@ -13,10 +13,10 @@ from vivia.tools.explore.search_operations import search_operations
 SQL = "SELECT ID_TIERS,\n  NVL(SEGMENT, 'X') SEGMENT\nFROM SDAINT.V_TIERS"
 OP = ("SDE_LOAD", "P_TIERS", 1, "Alimente P_TIERS", "SDETRG.P_TIERS")
 TRAC = {
-    "F_OPE": [("SDE", "V_P_TIERS$CV"), ("SDE", "V_W_AGG"), ("SDA", "COMPTE")],
-    "P_TIERS": [("SDA", "V_TIERS"), ("SDE", "P_ADRESSE")],
-    "W_AGG": [("SDE", "V_W_AGG"), ("SDE", "W_BASE")],  # boucle sur elle-meme
-    "W_BASE": [("SDA", "MOUVEMENT")],
+    "F_OPE": [("V_P_TIERS$CV",), ("SDETRG.W_AGG",)],
+    "P_TIERS": [("TIERS",)],
+    "W_AGG": [("V_W_AGG",), ("P_TIERS",)],  # boucle sur elle-meme, source deja vue
+    "TIERS": [("RAW_TIERS",)],
 }
 
 
@@ -26,11 +26,14 @@ class OperationToolsTests(unittest.TestCase):
 
         def fetch(sql, params=None, max_rows=0, max_seconds=None):
             self.calls.append((sql, params))
-            if sql == queries.TRAC_DATA_SOURCES:
+            if sql == queries.VIEW_OWNERS:
+                return [], [("SDEINT",), ("DMDINT",)]
+            if "target_name LIKE :target" in sql:
                 return [], TRAC.get(params["target"], [])
             last = 3 if "REGEXP_COUNT" in sql else SQL
             return [], [(*OP, last)]
 
+        framework.schemas.cache_clear()
         patcher = mock.patch.object(client, "fetch", fetch)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -55,21 +58,25 @@ class OperationToolsTests(unittest.TestCase):
         self.assertIn("| SDE_LOAD | P_TIERS | 1 | Alimente P_TIERS | SDETRG.P_TIERS | 3 |", result)
         self.assertIn("chaine IN (:chaine_0, :chaine_1)", self.calls[-1][0])
 
-    def test_one_level_by_default_with_the_size_of_each_branch(self):
+    def test_level_one_is_the_direct_sources_only(self):
         result = get_dependencies("sdetrg.f_ope")
-        self.assertIn('P_TIERS["P_TIERS (SDE, table P, 2 sources)"]', result)
-        self.assertIn('W_AGG["W_AGG (SDE, 2 sources)"]', result)
-        self.assertIn('COMPTE["COMPTE (SDA, source)"]', result)
         self.assertIn("P_TIERS --> F_OPE", result)
-        self.assertNotIn("W_BASE", result)
-        self.assertIn("Branches non remontees : P_TIERS (2), W_AGG (2).", result)
+        self.assertIn("W_AGG --> F_OPE", result)
+        self.assertNotIn("TIERS --> P_TIERS", result)
 
-    def test_several_levels_stop_at_p_tables_and_sda(self):
-        result = get_dependencies("F_OPE", niveaux=5)
-        self.assertIn("W_BASE --> W_AGG", result)
-        self.assertIn("MOUVEMENT --> W_BASE", result)
-        self.assertNotIn("P_ADRESSE", result)  # table P non remontee
-        self.assertIn("Branches non remontees : P_TIERS (2).", result)
+    def test_each_level_repeats_the_search_for_every_new_source(self):
+        result = get_dependencies("F_OPE", niveaux=3)
+        self.assertIn("TIERS --> P_TIERS", result)
+        self.assertIn("RAW_TIERS --> TIERS", result)
+        self.assertNotIn("W_AGG --> W_AGG", result)
+        targets = [p["target"] for s, p in self.calls if p and "target" in p]
+        self.assertEqual(targets, ["F_OPE", "P_TIERS", "W_AGG", "TIERS"])
+
+    def test_framework_views_are_read_from_the_discovered_schemas(self):
+        get_dependencies("F_OPE")
+        sql = self.calls[-1][0]
+        self.assertIn("FROM SDEINT.V_M_TRAC_DATA UNION ALL SELECT", sql)
+        self.assertIn("FROM DMDINT.V_M_TRAC_DATA", sql)
 
     def test_view_names_are_reduced_to_their_table(self):
         self.assertEqual(table_name("SDEINT.V_P_FLUX$CV"), "P_FLUX")
@@ -90,11 +97,3 @@ class OperationSizeTests(unittest.TestCase):
         cut = fmt.operations_sql("P_TIERS", [(*OP, "y" * 300_000)])
         self.assertTrue(cut.startswith("ATTENTION : SQL tronque"))
         self.assertLess(len(cut), fmt.MAX_SQL_CHARS + 200)
-
-
-class FrameworkViewsTests(unittest.TestCase):
-    def test_framework_queries_never_read_sdaint(self):
-        for sql in (queries.OPERATIONS, queries.TRAC_DATA_SOURCES):
-            self.assertNotIn("SDAINT", sql)
-            self.assertIn("SDEINT", sql)
-            self.assertIn("DMDINT", sql)

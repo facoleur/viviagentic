@@ -12,15 +12,15 @@ from vivia.tools.explore.queries import DESCRIBE_TABLE_PK, VIEW_TABLES
 OPS = [("SDE_LOAD", "P_TIERS", 1, "SDETRG.P_TIERS", "SELECT ID_TIERS, CD_SEG FROM SDAINT.V_TIERS")]
 ANSWERS = {
     VIEW_TABLES: [("SDAINT.V_TIERS", "SDATRG.TIERS")],
-    sql.TRAC: [
+    "V_M_TRAC_DATA": [
         ("SDE_LOAD", "P_TIERS", "SDETRG.P_TIERS", "SDAINT.V_TIERS"),
         ("DMD_LOAD", "D_TIERS", "DMDTRG.D_TIERS", "SDETRG.P_TIERS"),
         ("DMD_LOAD", "F_OPE", "DMDTRG.F_OPE", "SDETRG.P_TIERS"),
     ],
-    sql.FLOWS: [("SDE_LOAD", "P_TIERS", "DAILY")],
+    "V_M_FLOWDATA": [("SDE_LOAD", "P_TIERS", "DAILY")],
     DESCRIBE_TABLE_PK: [("ID_TIERS",)],
     sql.TABLE_COMMENT: [("Tiers historises",)],
-    sql.OPERATIONS: OPS,
+    sql.OPERATIONS.format(source="V_M_OPERATION"): OPS,
 }
 
 
@@ -54,9 +54,10 @@ REDACTION = Redaction(
 
 class RetrodocTests(unittest.TestCase):
     def setUp(self):
-        patcher = mock.patch.object(collect, "fetch", fake_fetch)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        for name, fake in (("fetch", fake_fetch), ("union", lambda view, cols: view)):
+            patcher = mock.patch.object(collect, name, fake)
+            patcher.start()
+            self.addCleanup(patcher.stop)
         self.fw = collect.framework()
 
     def test_strategic_ranks_tables_by_reading_flows(self):

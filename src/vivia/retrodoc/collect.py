@@ -5,6 +5,7 @@ from collections import Counter
 
 from vivia.oracle.client import fetch
 from vivia.retrodoc import sql
+from vivia.tools.explore.framework import union
 from vivia.tools.explore.queries import DESCRIBE_TABLE_PK, VIEW_TABLES
 
 ALL = 10_000_000  # pas de plafond de lignes pour ces requetes
@@ -16,8 +17,8 @@ def framework() -> dict:
     """TRAC_DATA (sources ramenees de la vue a la table) et frequence par flux, charges une fois."""
     _, views = fetch(VIEW_TABLES, max_rows=ALL)
     table_of = dict(views)
-    _, trac = fetch(sql.TRAC, max_rows=ALL)
-    _, flows = fetch(sql.FLOWS, max_rows=ALL)
+    _, trac = fetch(union(*sql.TRAC), max_rows=ALL)
+    _, flows = fetch(union(*sql.FLOWS), max_rows=ALL)
     return {
         "trac": [(ch, fl, cible, table_of.get(src, src)) for ch, fl, cible, src in trac],
         "frequence": {(ch, fl): freq for ch, fl, freq in flows},
@@ -36,7 +37,7 @@ def facts(table: str, fw: dict, glossary: dict[str, str]) -> dict:
     cols = columns(table)
     _, pk = fetch(DESCRIBE_TABLE_PK, {"owner": owner, "name": name})
     _, comment = fetch(sql.TABLE_COMMENT, {"owner": owner, "name": name})
-    _, ops = fetch(sql.OPERATIONS, {"t": table}, max_rows=ALL)
+    _, ops = fetch(sql.OPERATIONS.format(source=union(*sql.OPS)), {"t": table}, max_rows=ALL)
     sample, profiled = profile(table, cols)
     producers = sorted({(ch, fl) for ch, fl, _, cible, _ in ops if cible == table})
     sources = sorted({src for _, _, cible, src in fw["trac"] if cible == table})
