@@ -36,11 +36,11 @@ OPERATIONS = (
     "WHERE {where} ORDER BY chaine, flux, operation_nr"
 )
 
-# Une ligne par (flux, table cible, table source) declaree par le framework.
+# Sources d'une table : zone de la source et son nom (vue ou table), cible = nom sans schema.
 TRAC_DATA_SOURCES = (
-    f"SELECT chaine, flux, table_source FROM "
-    f"({all_zones('V_TRAC_DATA', 'chaine, flux, table_cible, table_source')}) "
-    "WHERE table_cible = :cible ORDER BY chaine, flux, table_source"
+    "SELECT DISTINCT source_application_code, source_name FROM "
+    f"({all_zones('V_TRAC_DATA', 'source_application_code, source_name, target_name')}) "
+    "WHERE target_name = :target ORDER BY source_name"
 )
 
 # Vue -> table(s) qu'elle lit : les flux lisent SDEINT.V_X, ecrit dans SDETRG.X.

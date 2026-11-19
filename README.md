@@ -202,8 +202,9 @@ Operations ELT, lues dans les vues `V_M_OPERATION` des schemas `*INT` (colonnes 
 `tools/explore/queries.py`, `OPERATION_NR` unique dans un flux seulement) :
 `get_operation` (SQL d'un flux ou d'une operation, 200 000 caracteres au plus), `search_operations` (toujours dans le
 nom de flux, la description et le SQL, avec les lignes trouvees), `list_operations` (operations d'une ou plusieurs
-chaines). `get_dependencies` remonte `V_TRAC_DATA` recursivement, vues `*INT` ramenees a leur
-table, jusqu'aux tables sans source declaree (en general SDA).
+chaines). `get_dependencies("P_FLUX")` (nom de table seul) remonte `V_TRAC_DATA` (`TARGET_NAME`,
+`SOURCE_NAME`, `SOURCE_APPLICATION_CODE`) niveau par niveau jusqu'aux sources SDA, 10 niveaux
+au plus, et renvoie un graphe Mermaid. Une source `V_P_FLUX$CV` est ramenee a `P_FLUX`.
 
 ```sh
 docker compose -f docker/oracle-test/docker-compose.yml up -d   # Oracle Free, schemas zone+type

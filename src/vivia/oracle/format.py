@@ -3,6 +3,8 @@
 Seul module a produire du texte affiche : les tools n'assemblent pas de Markdown eux-memes.
 """
 
+import re
+
 import oracledb
 
 from vivia.oracle import glossary
@@ -238,16 +240,30 @@ def distinct_values_report(col: str, rows: list[tuple], limit: int) -> str:
 # --- get_dependencies ----------------------------------------------------------------------------
 
 
-def dependency_line(depth, source, bases, chaine, flux, new: bool) -> str:
-    table = f" = {', '.join(f'`{b}`' for b in bases)}" if bases != [source] else ""
-    seen = "" if new else " — deja remontee plus haut"
-    return f"{'  ' * depth}- `{source}`{table} (chaine {chaine}, flux {flux}){seen}"
+def _node(name: str) -> str:
+    """Identifiant Mermaid : lettres, chiffres et _ seulement."""
+    return re.sub(r"\W", "_", name)
 
 
-def dependencies_report(table_cible: str, lines: list[str]) -> str:
-    if not lines:
-        return f"Aucune dependance declaree dans TRAC_DATA pour {table_cible}."
-    return truncate("\n".join([f"## Sources necessaires a {table_cible}", *lines]))
+def dependencies_graph(root: str, edges: list, zones: dict, complete: bool) -> str:
+    """Graphe Mermaid source --> cible, zone de chaque source dans le libelle du noeud."""
+    if not edges:
+        return f"Aucune source declaree dans TRAC_DATA pour {root}."
+    labels = [f'  {_node(n)}["{n} ({z})"]' for n, z in zones.items()]
+    arrows = [f"  {_node(s)} --> {_node(t)}" for s, t in edges]
+    sda = sorted(n for n, z in zones.items() if z == "SDA")
+    lines = [
+        f"## Sources de {root} (TRAC_DATA, jusqu'a SDA)",
+        "```mermaid",
+        "graph LR",
+        *labels,
+        *arrows,
+        "```",
+        f"Sources SDA atteintes : {', '.join(sda) or 'aucune'}.",
+    ]
+    if not complete:
+        lines.append("Profondeur maximale atteinte : graphe incomplet.")
+    return truncate("\n".join(lines))
 
 
 # --- operations --------------------------------------------------------------------------------

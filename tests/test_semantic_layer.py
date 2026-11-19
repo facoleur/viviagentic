@@ -48,13 +48,14 @@ class SemanticLayerOracleTests(unittest.TestCase):
 
     def test_get_dependencies_lists_every_source(self):
         # F_OPERATION a deux sources dans TRAC_DATA (voir docker/oracle-test/init.sql).
-        result = get_dependencies("DMDTRG.F_OPERATION")
-        self.assertIn("SDEINT.V_P_FLUX", result)
-        self.assertIn("SDEINT.V_P_TIERS", result)
+        result = get_dependencies("F_OPERATION")
+        self.assertIn("P_FLUX --> F_OPERATION", result)
+        self.assertIn("P_TIERS --> F_OPERATION", result)
+        self.assertIn("MOUVEMENT --> P_FLUX", result)
 
     def test_get_dependencies_on_a_root_table_is_empty(self):
-        result = get_dependencies("SDATRG.TIERS")
-        self.assertIn("Aucune dependance", result)
+        result = get_dependencies("TIERS")
+        self.assertIn("Aucune source", result)
 
 
 if __name__ == "__main__":
