@@ -29,8 +29,7 @@ OPERATION_COLUMNS = "chaine, flux, operation_nr, operation_description, table_ci
 OPERATIONS = "SELECT {cols} FROM ({source}) WHERE {where} ORDER BY chaine, flux, operation_nr"
 
 TRAC_DATA_SOURCES = (
-    "SELECT DISTINCT source_name FROM ({source}) WHERE target_name LIKE :target "
-    "ORDER BY source_name"
+    "SELECT DISTINCT source_name FROM ({source}) WHERE target_name = :target ORDER BY source_name"
 )
 
 # Vue -> table(s) qu'elle lit : les flux lisent SDEINT.V_X, ecrit dans SDETRG.X.

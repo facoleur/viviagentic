@@ -203,9 +203,9 @@ decouverts dans `ALL_VIEWS` (`tools/explore/framework.py`), rien n'est code en d
 `get_operation` (SQL d'un flux ou d'une operation, 200 000 caracteres au plus),
 `search_operations` (nom de flux, description et SQL, avec les lignes trouvees),
 `list_operations` (operations d'une ou plusieurs chaines). `get_dependencies("P_FLUX")` :
-`SELECT source_name ... WHERE target_name LIKE 'P_FLUX'`, puis la meme recherche pour chaque
-source trouvee, 3 niveaux au plus ; graphe Mermaid, noms de vue ramenes a la table
-(`V_P_FLUX$CV` -> `P_FLUX`).
+`SELECT source_name ... WHERE target_name = 'P_FLUX'`, puis la meme recherche pour chaque
+source trouvee, 3 niveaux au plus ; graphe Mermaid. Noms exacts des tables,
+sans schema.
 
 ```sh
 docker compose -f docker/oracle-test/docker-compose.yml up -d   # Oracle Free, schemas zone+type

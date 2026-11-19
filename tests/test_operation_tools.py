@@ -5,7 +5,7 @@ from unittest import mock
 
 from vivia.oracle import client
 from vivia.tools.explore import framework, queries
-from vivia.tools.explore.get_dependencies import get_dependencies, table_name
+from vivia.tools.explore.get_dependencies import get_dependencies
 from vivia.tools.explore.get_operation import get_operation
 from vivia.tools.explore.list_operations import list_operations
 from vivia.tools.explore.search_operations import search_operations
@@ -13,9 +13,9 @@ from vivia.tools.explore.search_operations import search_operations
 SQL = "SELECT ID_TIERS,\n  NVL(SEGMENT, 'X') SEGMENT\nFROM SDAINT.V_TIERS"
 OP = ("SDE_LOAD", "P_TIERS", 1, "Alimente P_TIERS", "SDETRG.P_TIERS")
 TRAC = {
-    "F_OPE": [("V_P_TIERS$CV",), ("SDETRG.W_AGG",)],
+    "F_OPE": [("P_TIERS",), ("W_AGG",)],
     "P_TIERS": [("TIERS",)],
-    "W_AGG": [("V_W_AGG",), ("P_TIERS",)],  # boucle sur elle-meme, source deja vue
+    "W_AGG": [("W_AGG",), ("P_TIERS",)],  # boucle sur elle-meme, source deja vue
     "TIERS": [("RAW_TIERS",)],
 }
 
@@ -28,7 +28,7 @@ class OperationToolsTests(unittest.TestCase):
             self.calls.append((sql, params))
             if sql == queries.VIEW_OWNERS:
                 return [], [("SDEINT",), ("DMDINT",)]
-            if "target_name LIKE :target" in sql:
+            if "target_name = :target" in sql:
                 return [], TRAC.get(params["target"], [])
             last = 3 if "REGEXP_COUNT" in sql else SQL
             return [], [(*OP, last)]
@@ -59,7 +59,7 @@ class OperationToolsTests(unittest.TestCase):
         self.assertIn("chaine IN (:chaine_0, :chaine_1)", self.calls[-1][0])
 
     def test_level_one_is_the_direct_sources_only(self):
-        result = get_dependencies("sdetrg.f_ope")
+        result = get_dependencies("f_ope")
         self.assertIn("P_TIERS --> F_OPE", result)
         self.assertIn("W_AGG --> F_OPE", result)
         self.assertNotIn("TIERS --> P_TIERS", result)
@@ -77,10 +77,6 @@ class OperationToolsTests(unittest.TestCase):
         sql = self.calls[-1][0]
         self.assertIn("FROM SDEINT.V_M_TRAC_DATA UNION ALL SELECT", sql)
         self.assertIn("FROM DMDINT.V_M_TRAC_DATA", sql)
-
-    def test_view_names_are_reduced_to_their_table(self):
-        self.assertEqual(table_name("SDEINT.V_P_FLUX$CV"), "P_FLUX")
-        self.assertEqual(table_name("p_flux"), "P_FLUX")
 
 
 class OperationSizeTests(unittest.TestCase):
