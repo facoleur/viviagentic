@@ -47,10 +47,10 @@ class OperationToolsTests(unittest.TestCase):
         self.assertEqual(params, {"flux": "P_TIERS", "nr": 1, "chaine": "SDE_LOAD"})
 
     def test_search_in_sql_shows_numbered_matching_lines(self):
-        result = search_operations("nvl(", dans="sql", chaines=["sde_load"])
+        result = search_operations("nvl(", chaines=["sde_load"])
         self.assertIn("l.2 : `NVL(SEGMENT, 'X') SEGMENT`", result)
         sql, params = self.calls[-1]
-        self.assertIn("(UPPER(sql_text) LIKE :needle) AND chaine IN (:chaine_0)", sql)
+        self.assertIn("OR UPPER(sql_text) LIKE :needle) AND chaine IN (:chaine_0)", sql)
         self.assertEqual(params, {"needle": "%NVL(%", "chaine_0": "SDE_LOAD"})
 
     def test_list_operations_counts_sql_lines_without_fetching_the_sql(self):
@@ -72,3 +72,19 @@ class OperationToolsTests(unittest.TestCase):
 
     def test_dependencies_one_level(self):
         self.assertEqual(len(get_dependencies("DMDTRG.F_OPE", recursif=False).splitlines()), 3)
+
+
+class OperationSizeTests(unittest.TestCase):
+    def test_long_flux_is_refused_and_long_single_operation_is_truncated(self):
+        from vivia.oracle import format as fmt
+
+        big = "x" * 150_000
+        two = [(*OP, big), ("SDE_LOAD", "P_TIERS", 2, None, "SDETRG.P_TIERS", big)]
+        refused = fmt.operations_sql("P_TIERS", two)
+        self.assertIn("rappeler get_operation avec `operation_nr`", refused)
+        self.assertIn("- op 2 : 150,000 caracteres", refused)
+        self.assertLess(len(refused), 1000)
+
+        cut = fmt.operations_sql("P_TIERS", [(*OP, "y" * 300_000)])
+        self.assertTrue(cut.startswith("ATTENTION : SQL tronque"))
+        self.assertLess(len(cut), fmt.MAX_SQL_CHARS + 200)

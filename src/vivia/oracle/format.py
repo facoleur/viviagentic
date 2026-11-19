@@ -257,12 +257,30 @@ def _operation_title(chaine, flux, nr, description, cible) -> str:
     return f"{chaine}.{flux} op {nr} -> `{cible}`" + (f" — {description}" if description else "")
 
 
+MAX_SQL_CHARS = 200_000
+
+
 def operations_sql(flux: str, rows: list[tuple]) -> str:
-    """SQL complet, non tronque : c'est ce que l'agent vient lire."""
+    """SQL complet jusqu'a MAX_SQL_CHARS ; au-dela, refus (flux) ou troncature (operation seule)."""
     if not rows:
         return f"Aucune operation pour le flux {flux}. Utiliser search_operations."
-    return "\n\n".join(
+    text = "\n\n".join(
         f"### {_operation_title(*row[:5])}\n```sql\n{row[5] or ''}\n```" for row in rows
+    )
+    if len(text) <= MAX_SQL_CHARS:
+        return text
+    if len(rows) > 1:
+        sizes = [f"- op {nr} : {len(sql or ''):,} caracteres" for _, _, nr, *_, sql in rows]
+        return "\n".join(
+            [
+                f"SQL du flux {flux} trop long ({len(text):,} caracteres > {MAX_SQL_CHARS:,}) : "
+                "rappeler get_operation avec `operation_nr` pour une operation a la fois.",
+                *sizes,
+            ]
+        )
+    return (
+        f"ATTENTION : SQL tronque a {MAX_SQL_CHARS:,} caracteres sur {len(text):,}. "
+        "La fin de l'operation manque.\n\n" + text[:MAX_SQL_CHARS]
     )
 
 

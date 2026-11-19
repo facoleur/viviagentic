@@ -1,13 +1,13 @@
-"""Recherche d'operations ELT par nom de flux, description ou contenu SQL."""
+"""Recherche d'operations ELT : toujours dans le nom du flux, la description et le SQL."""
 
-from typing import Annotated, Literal
+from typing import Annotated
 
 from pydantic import Field
 
 from vivia.oracle import format as fmt
 from vivia.tools.explore.operations import fetch_operations, in_list
 
-_FIELDS = {"nom": "flux", "description": "operation_description", "sql": "sql_text"}
+_FIELDS = ("flux", "operation_description", "sql_text")
 
 
 def search_operations(
@@ -15,10 +15,6 @@ def search_operations(
         str,
         Field(description="Sous-chaine cherchee, insensible a la casse (ex. 'P_TIERS', 'NVL(')."),
     ],
-    dans: Annotated[
-        Literal["tout", "nom", "description", "sql"],
-        Field(description="Ou chercher : nom du flux, description, SQL, ou les trois."),
-    ] = "tout",
     chaines: Annotated[
         list[str] | None, Field(description="Restreint a ces chaines. Omis = toutes.")
     ] = None,
@@ -29,11 +25,10 @@ def search_operations(
     Pour le SQL, renvoie les lignes qui correspondent (numerotees), pas le SQL entier :
     enchainer avec get_operation pour le lire.
 
-    Exemple : search_operations("SDETRG.P_TIERS", dans="sql")
+    Exemple : search_operations("SDETRG.P_TIERS")
     """
     params: dict = {"needle": f"%{texte.strip().upper()}%"}
-    cols = _FIELDS.values() if dans == "tout" else [_FIELDS[dans]]
-    where = ["(" + " OR ".join(f"UPPER({c}) LIKE :needle" for c in cols) + ")"]
+    where = ["(" + " OR ".join(f"UPPER({c}) LIKE :needle" for c in _FIELDS) + ")"]
     if chaines:
         where.append(in_list("chaine", chaines, params))
     rows = fetch_operations(where, params, max_rows=limite)

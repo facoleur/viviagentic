@@ -21,6 +21,9 @@ def get_operation(
 ) -> str:
     """SQL complet des operations d'un flux (ou d'une seule), avec table cible et description.
 
+    200 000 caracteres au plus : au-dela, un flux entier est refuse (rappeler avec
+    `operation_nr`) et une operation seule est tronquee, avec un avertissement.
+
     Exemple : get_operation("P_TIERS"), ou get_operation("P_FLUX", operation_nr=2)
     """
     where, params = ["flux = :flux"], {"flux": flux.strip().upper()}

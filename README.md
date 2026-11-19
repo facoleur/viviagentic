@@ -200,8 +200,8 @@ sans jamais faire planter l'outil.
 
 Operations ELT, lues dans les vues `V_M_OPERATION` des schemas `*INT` (colonnes dans
 `tools/explore/queries.py`, `OPERATION_NR` unique dans un flux seulement) :
-`get_operation` (SQL complet d'un flux ou d'une operation), `search_operations` (nom de flux,
-description ou SQL, avec les lignes trouvees), `list_operations` (operations d'une ou plusieurs
+`get_operation` (SQL d'un flux ou d'une operation, 200 000 caracteres au plus), `search_operations` (toujours dans le
+nom de flux, la description et le SQL, avec les lignes trouvees), `list_operations` (operations d'une ou plusieurs
 chaines). `get_dependencies` remonte `V_TRAC_DATA` recursivement, vues `*INT` ramenees a leur
 table, jusqu'aux tables sans source declaree (en general SDA).
 

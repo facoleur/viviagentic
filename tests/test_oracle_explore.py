@@ -147,7 +147,7 @@ if __name__ == "__main__":
         self.assertIn("FROM SDAINT.V_TIERS", result)
 
     def test_search_operations_finds_a_table_read_in_the_sql(self):
-        result = search_operations("SDAINT.V_MOUVEMENT", dans="sql")
+        result = search_operations("SDAINT.V_MOUVEMENT")
         self.assertIn("P_FLUX", result)
 
     def test_list_operations_of_a_chain(self):
