@@ -11,7 +11,7 @@ from vivia.oracle import format as fmt
 from vivia.oracle.sql_guard import RejectedSQL, ensure_single_select
 from vivia.tools.explore import queries
 from vivia.tools.explore import templates as sql_templates
-from vivia.tools.explore.operations import fetch_operations
+from vivia.tools.explore.operations import by_flux, fetch_operations
 
 _DEFAULT_MAX_SECONDS = client.CALL_TIMEOUT_MS / 1000
 
@@ -34,11 +34,7 @@ class AmbiguousOperation(Exception):
 
 def _lookup_operation(flux: str, operation: int, chaine: str | None) -> str:
     """SQL de l'operation `operation` du flux, dans V_M_OPERATION (operation_nr unique par flux)."""
-    where, params = ["flux = :flux", "operation_nr = :nr"], {"flux": flux.upper(), "nr": operation}
-    if chaine:
-        where.append("chaine = :chaine")
-        params["chaine"] = chaine.upper()
-    rows = fetch_operations(where, params)
+    rows = fetch_operations(*by_flux(flux, operation, chaine))
     if not rows:
         raise OperationNotFound(flux, operation)
     if len(rows) > 1:

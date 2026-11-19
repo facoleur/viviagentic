@@ -14,6 +14,18 @@ def fetch_operations(
     return client.fetch(sql, params, max_rows=max_rows)[1]
 
 
+def by_flux(flux: str, operation_nr: int | None, chaine: str | None) -> tuple[list[str], dict]:
+    """Filtre (where, binds) sur un flux, et si donnes sur un numero d'operation et une chaine."""
+    where, params = ["flux = :flux"], {"flux": flux.strip().upper()}
+    if operation_nr is not None:
+        where.append("operation_nr = :nr")
+        params["nr"] = operation_nr
+    if chaine:
+        where.append("chaine = :chaine")
+        params["chaine"] = chaine.strip().upper()
+    return where, params
+
+
 def in_list(column: str, values: list[str], params: dict) -> str:
     """`column IN (:column_0, ...)`, en ajoutant les binds (en majuscules) a `params`."""
     names = [f"{column}_{i}" for i in range(len(values))]

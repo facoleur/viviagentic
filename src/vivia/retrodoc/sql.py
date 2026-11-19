@@ -1,13 +1,8 @@
-"""Requetes du framework ETL et du dictionnaire. Seul fichier a adapter si les noms de la prod
-different (vues V_* exposees dans chaque schema *INT).
+"""Requetes propres a la retro-doc. Les vues du framework et le dictionnaire commun sont dans
+`vivia.tools.explore.queries`, partages avec les outils.
 """
 
-ZONES = ("SDA", "SDE", "DMD")
-
-
-def _all_zones(view: str, columns: str) -> str:
-    return " UNION ALL ".join(f"SELECT {columns} FROM {zone}INT.{view}" for zone in ZONES)
-
+from vivia.tools.explore.queries import all_zones as _all_zones
 
 # Qui lit quoi : une ligne par (flux, table cible, table source).
 TRAC = _all_zones("V_TRAC_DATA", "chaine, flux, table_cible, table_source")
@@ -23,12 +18,6 @@ OPERATIONS = f"""
     ORDER BY chaine, flux, operation_nr
 """
 
-# Vue -> table qu'elle expose (les flux lisent souvent SDEINT.V_X plutot que SDETRG.X).
-VIEWS = """
-    SELECT owner || '.' || name, referenced_owner || '.' || referenced_name
-    FROM all_dependencies WHERE type = 'VIEW' AND referenced_type = 'TABLE'
-"""
-
 TABLE_COMMENT = "SELECT comments FROM all_tab_comments WHERE owner = :owner AND table_name = :name"
 
 COLUMNS = """
@@ -38,14 +27,6 @@ COLUMNS = """
       ON m.owner = c.owner AND m.table_name = c.table_name AND m.column_name = c.column_name
     WHERE c.owner = :owner AND c.table_name = :name
     ORDER BY c.column_id
-"""
-
-PK = """
-    SELECT acc.column_name
-    FROM all_constraints ac JOIN all_cons_columns acc
-      ON acc.owner = ac.owner AND acc.constraint_name = ac.constraint_name
-    WHERE ac.owner = :owner AND ac.table_name = :name AND ac.constraint_type = 'P'
-    ORDER BY acc.position
 """
 
 # {stats} : COUNT(col), APPROX_COUNT_DISTINCT(col) par colonne ; {source} : table ou echantillon.

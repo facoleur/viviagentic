@@ -7,17 +7,18 @@ from unittest import mock
 
 from vivia.retrodoc import cli, collect, llm, sql
 from vivia.retrodoc.doc import Colonne, Redaction
+from vivia.tools.explore.queries import DESCRIBE_TABLE_PK, VIEW_TABLES
 
 OPS = [("SDE_LOAD", "P_TIERS", 1, "SDETRG.P_TIERS", "SELECT ID_TIERS, CD_SEG FROM SDAINT.V_TIERS")]
 ANSWERS = {
-    sql.VIEWS: [("SDAINT.V_TIERS", "SDATRG.TIERS")],
+    VIEW_TABLES: [("SDAINT.V_TIERS", "SDATRG.TIERS")],
     sql.TRAC: [
         ("SDE_LOAD", "P_TIERS", "SDETRG.P_TIERS", "SDAINT.V_TIERS"),
         ("DMD_LOAD", "D_TIERS", "DMDTRG.D_TIERS", "SDETRG.P_TIERS"),
         ("DMD_LOAD", "F_OPE", "DMDTRG.F_OPE", "SDETRG.P_TIERS"),
     ],
     sql.FLOWS: [("SDE_LOAD", "P_TIERS", "DAILY")],
-    sql.PK: [("ID_TIERS",)],
+    DESCRIBE_TABLE_PK: [("ID_TIERS",)],
     sql.TABLE_COMMENT: [("Tiers historises",)],
     sql.OPERATIONS: OPS,
 }

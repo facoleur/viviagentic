@@ -13,8 +13,6 @@ from vivia.oracle import client
 from vivia.oracle import format as fmt
 from vivia.tools.explore import queries
 
-_MAX_DEPTH = 15
-
 
 def get_dependencies(
     table_cible: Annotated[
@@ -48,9 +46,8 @@ def get_dependencies(
             todo = [b for b in bases if b not in seen]
             lines.append(fmt.dependency_line(depth, source, bases, chaine, flux, bool(todo)))
             seen.update(todo)
-            if recursif and depth < _MAX_DEPTH:
-                for base in todo:
-                    walk(base, depth + 1)
+            for base in todo if recursif else []:
+                walk(base, depth + 1)
 
     walk(table_cible.strip().upper(), 0)
     return fmt.dependencies_report(table_cible, lines)

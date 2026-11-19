@@ -5,7 +5,7 @@ from typing import Annotated
 from pydantic import Field
 
 from vivia.oracle import format as fmt
-from vivia.tools.explore.operations import fetch_operations
+from vivia.tools.explore.operations import by_flux, fetch_operations
 
 
 def get_operation(
@@ -26,11 +26,4 @@ def get_operation(
 
     Exemple : get_operation("P_TIERS"), ou get_operation("P_FLUX", operation_nr=2)
     """
-    where, params = ["flux = :flux"], {"flux": flux.strip().upper()}
-    if operation_nr is not None:
-        where.append("operation_nr = :nr")
-        params["nr"] = operation_nr
-    if chaine:
-        where.append("chaine = :chaine")
-        params["chaine"] = chaine.strip().upper()
-    return fmt.operations_sql(flux, fetch_operations(where, params))
+    return fmt.operations_sql(flux, fetch_operations(*by_flux(flux, operation_nr, chaine)))

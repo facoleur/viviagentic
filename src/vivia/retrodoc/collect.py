@@ -5,6 +5,7 @@ from collections import Counter
 
 from vivia.oracle.client import fetch
 from vivia.retrodoc import sql
+from vivia.tools.explore.queries import DESCRIBE_TABLE_PK, VIEW_TABLES
 
 ALL = 10_000_000  # pas de plafond de lignes pour ces requetes
 LOBS = ("CLOB", "NCLOB", "BLOB", "LONG", "XMLTYPE")
@@ -13,7 +14,7 @@ DOC_ZONES = ("SDA", "SDE")
 
 def framework() -> dict:
     """TRAC_DATA (sources ramenees de la vue a la table) et frequence par flux, charges une fois."""
-    _, views = fetch(sql.VIEWS, max_rows=ALL)
+    _, views = fetch(VIEW_TABLES, max_rows=ALL)
     table_of = dict(views)
     _, trac = fetch(sql.TRAC, max_rows=ALL)
     _, flows = fetch(sql.FLOWS, max_rows=ALL)
@@ -33,7 +34,7 @@ def facts(table: str, fw: dict, glossary: dict[str, str]) -> dict:
     """Dictionnaire, profil, exemples, flux, SQL producteur et glossaire utile d'une table."""
     owner, name = table.split(".")
     cols = columns(table)
-    _, pk = fetch(sql.PK, {"owner": owner, "name": name})
+    _, pk = fetch(DESCRIBE_TABLE_PK, {"owner": owner, "name": name})
     _, comment = fetch(sql.TABLE_COMMENT, {"owner": owner, "name": name})
     _, ops = fetch(sql.OPERATIONS, {"t": table}, max_rows=ALL)
     sample, profiled = profile(table, cols)

@@ -290,8 +290,8 @@ def search_operations_report(texte: str, rows: list[tuple], limit: int) -> str:
     lines = [f"## Operations contenant « {texte} »"]
     for *head, sql in rows:
         lines.append(f"- {_operation_title(*head)}")
-        hits = [(i, ln) for i, ln in enumerate((sql or "").splitlines(), 1)]
-        hits = [(i, ln) for i, ln in hits if texte.upper() in ln.upper()]
+        lines_sql = enumerate((sql or "").splitlines(), 1)
+        hits = [(i, ln) for i, ln in lines_sql if texte.upper() in ln.upper()]
         lines += [f"  - l.{i} : `{ln.strip()[:160]}`" for i, ln in hits[:3]]
         if len(hits) > 3:
             lines.append(f"  - ... {len(hits) - 3} autres lignes")

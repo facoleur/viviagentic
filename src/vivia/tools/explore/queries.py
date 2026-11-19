@@ -24,7 +24,7 @@ DISTINCT_VALUES = "SELECT DISTINCT {col} FROM {obj} ORDER BY {col} FETCH FIRST {
 ZONES = ("SDA", "SDE", "DMD")
 
 
-def _all_zones(view: str, columns: str) -> str:
+def all_zones(view: str, columns: str) -> str:
     return " UNION ALL ".join(f"SELECT {columns} FROM {zone}INT.{view}" for zone in ZONES)
 
 
@@ -32,14 +32,14 @@ OPERATION_COLUMNS = "chaine, flux, operation_nr, operation_description, table_ci
 
 # {cols} : colonnes a ramener (dont sql_text ou un calcul dessus) ; {where} : filtre du tool.
 OPERATIONS = (
-    f"SELECT {{cols}} FROM ({_all_zones('V_M_OPERATION', OPERATION_COLUMNS + ', sql_text')}) "
+    f"SELECT {{cols}} FROM ({all_zones('V_M_OPERATION', OPERATION_COLUMNS + ', sql_text')}) "
     "WHERE {where} ORDER BY chaine, flux, operation_nr"
 )
 
 # Une ligne par (flux, table cible, table source) declaree par le framework.
 TRAC_DATA_SOURCES = (
     f"SELECT chaine, flux, table_source FROM "
-    f"({_all_zones('V_TRAC_DATA', 'chaine, flux, table_cible, table_source')}) "
+    f"({all_zones('V_TRAC_DATA', 'chaine, flux, table_cible, table_source')}) "
     "WHERE table_cible = :cible ORDER BY chaine, flux, table_source"
 )
 
