@@ -20,8 +20,18 @@ def deep_merge(base: Any, patch: dict) -> dict:
 class OpenWebUI:
     def __init__(self, url: str, admin: dict[str, str]):
         self.http = httpx.Client(base_url=url.rstrip("/"), timeout=30)
-        self.http.post("/api/v1/auths/signup", json=admin)  # 400 si l'admin existe deja
-        token = self.call("POST", "/api/v1/auths/signin", admin)["token"]
+        # Cree l'admin si la base est vide ; sinon refuse (400/403), et c'est normal.
+        signup = self.http.post("/api/v1/auths/signup", json=admin)
+        creds = {"email": admin["email"], "password": admin["password"]}
+        res = self.http.post("/api/v1/auths/signin", json=creds)
+        if not res.is_success:
+            raise SystemExit(
+                f"signin {admin['email']} -> {res.status_code} {res.text[:200]}\n"
+                f"signup -> {signup.status_code} {signup.text[:200]}\n"
+                "Un autre compte est peut-etre deja admin, ou le mot de passe de "
+                "vivia.users.toml differe de celui en base."
+            )
+        token = res.json()["token"]
         self.http.headers["Authorization"] = f"Bearer {token}"
 
     def call(self, method: str, path: str, body: Any = None) -> Any:
