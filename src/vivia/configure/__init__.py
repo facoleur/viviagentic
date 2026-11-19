@@ -1,7 +1,7 @@
 """Applique `vivia.toml` a Open WebUI via son API REST. Idempotent.
 
 Un module par type de ressource ; `main` les applique dans l'ordre des dependances :
-les skills et les fonctions existent avant que les modeles ne les referencent.
+les connexions, skills et fonctions existent avant que les modeles ne les referencent.
 """
 
 import sys
@@ -9,6 +9,7 @@ import tomllib
 from pathlib import Path
 
 from vivia.configure.client import ROOT, OpenWebUI, deep_merge
+from vivia.configure.connections import sync_connections
 from vivia.configure.functions import sync_functions
 from vivia.configure.models import sync_models, upsert_model
 from vivia.configure.settings import sync_api
@@ -21,6 +22,7 @@ __all__ = [
     "deep_merge",
     "main",
     "sync_api",
+    "sync_connections",
     "sync_functions",
     "sync_models",
     "sync_skills",
@@ -44,6 +46,7 @@ def main() -> None:
 
     sync_users(api, cfg.get("users", []), cfg.get("groups", []))
     sync_api(api, cfg.get("api", {}))
+    sync_connections(api, cfg.get("connections", []))
     sync_skills(api, cfg.get("skills", []))
     sync_functions(api, cfg.get("functions", []))
     sync_models(api, cfg.get("models", []), cfg["openwebui"].get("only_declared_models", False))

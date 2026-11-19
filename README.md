@@ -21,7 +21,7 @@ rejouable a volonte, et ne demande jamais de passer par l'UI.
 
 Chaque table `[api."<chemin>"]` est POSTee telle quelle sur `/api/v1/<chemin>` : ajouter ou
 retirer un reglage ne demande aucune modification de code, et n'importe quel endpoint de
-configuration est atteignable. Seules `[[groups]]`, `[[skills]]`, `[[models]]` et `[[functions]]`
+configuration est atteignable. Seules `[[groups]]`, `[[connections]]`, `[[skills]]`, `[[models]]` et `[[functions]]`
 ont un schema fixe, chacune traitee par un module de `src/vivia/configure/`.
 Les noms de cles sont documentes dans
 <https://docs.openwebui.com/getting-started/env-configuration/>.
@@ -33,6 +33,20 @@ dans `[[models]]` (ici `qwen3:8b`) restent proposes : tout autre modele liste pa
 dans Ollama est desactive au `make configure` suivant. Le modele d'arene est coupe par
 `[api."evaluations/config"]`. Desactiver `nomic-embed-text` ici ne touche pas aux embeddings
 RAG, qui l'appellent directement.
+
+### Connexions et modeles derives
+
+`[[connections]]` ajoute une connexion OpenAI-compatible (reperee par son URL, les autres
+connexions restent intactes). Sa cle n'est jamais dans le `.toml` : `api_key_env` nomme la
+variable de `.env` qui la contient (`make configure` charge `.env`). Avec `prefix_id = "gw"`,
+ses modeles apparaissent en `gw.<id distant>`.
+
+Un `[[models]]` avec `base_model_id` cree un modele derive : son propre id et nom, ses tools
+(`toolIds`, dont le serveur MCP `server:mcp:vivia`), ses skills, et des outils integres
+d'Open WebUI coupes via `meta.builtinTools` (`web_search = false`, ...; une categorie absente
+reste active, garder `skills` pour `view_skill`). `public = true` le rend visible de tous les
+comptes. Le modele de base, non declare, est masque par `only_declared_models` sans gener le
+modele derive, qui route directement vers la connexion.
 
 ### Skills
 
