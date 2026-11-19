@@ -85,3 +85,11 @@ class OperationSizeTests(unittest.TestCase):
         cut = fmt.operations_sql("P_TIERS", [(*OP, "y" * 300_000)])
         self.assertTrue(cut.startswith("ATTENTION : SQL tronque"))
         self.assertLess(len(cut), fmt.MAX_SQL_CHARS + 200)
+
+
+class FrameworkViewsTests(unittest.TestCase):
+    def test_framework_queries_never_read_sdaint(self):
+        for sql in (queries.OPERATIONS, queries.TRAC_DATA_SOURCES):
+            self.assertNotIn("SDAINT", sql)
+            self.assertIn("SDEINT", sql)
+            self.assertIn("DMDINT", sql)

@@ -43,7 +43,7 @@ def get_dependencies(
                 source = table_name(source_name)
                 edges[(source, target)] = None
                 zones[source] = zone
-                if zone != "SDA" and source not in seen:
+                if zone != "SDA" and source not in seen:  # SDA = source initiale, on s'arrete
                     seen.add(source)
                     upper.append(source)
         level = upper

@@ -21,7 +21,8 @@ DISTINCT_VALUES = "SELECT DISTINCT {col} FROM {obj} ORDER BY {col} FETCH FIRST {
 
 # Vues du framework ETL, une par zone dans le schema *INT : seul endroit a adapter si les noms
 # de colonnes de la prod different. OPERATION_NR n'est unique que dans un flux.
-ZONES = ("SDA", "SDE", "DMD")
+# Pas de SDAINT : SDA ne porte que des sources, sans vue du framework.
+ZONES = ("SDE", "DMD")
 
 
 def all_zones(view: str, columns: str) -> str:
