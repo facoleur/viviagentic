@@ -28,8 +28,6 @@ def fake_fetch(query, params=None, max_rows=0):
     if query == sql.COLUMNS:
         cols = {"P_TIERS": [("ID_TIERS", "NUMBER", None), ("CD_SEG", "VARCHAR2", "segment")]}
         return ["C", "T", "M"], cols.get(params["name"], [("ID_TIERS", "NUMBER", None)])
-    if query.startswith("SELECT COUNT(*)"):
-        return [], [(2000, 2000, 2000, 1500, 4)]
     if query.startswith("SELECT * FROM"):
         return ["ID_TIERS", "CD_SEG"], [(1, "PRO")]
     return [], ANSWERS[query]
@@ -54,7 +52,19 @@ REDACTION = Redaction(
 
 class RetrodocTests(unittest.TestCase):
     def setUp(self):
-        for name, fake in (("fetch", fake_fetch), ("union", lambda view, cols: view)):
+        profile = {
+            "rows": 2000,
+            "sampled": True,
+            "columns": {
+                "ID_TIERS": {"non_null": 2000, "distinct": 2000},
+                "CD_SEG": {"non_null": 1500, "distinct": 4},
+            },
+        }
+        for name, fake in (
+            ("fetch", fake_fetch),
+            ("union", lambda view, cols: view),
+            ("profile_of_the_day", lambda owner, table, columns: profile),
+        ):
             patcher = mock.patch.object(collect, name, fake)
             patcher.start()
             self.addCleanup(patcher.stop)

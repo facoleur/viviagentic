@@ -140,6 +140,13 @@ class OracleExploreTests(unittest.TestCase):
         result = compare_sql("P_TIERS", 1, slow, max_seconds=1)
         self.assertIn("Depassement", result)
 
+    def test_describe_table_profiles_each_column_on_a_sample(self):
+        result = describe_table("SDETRG.P_TIERS")
+        self.assertIn("Profil sur", result)
+        self.assertRegex(result, r"- `SEGMENT` VARCHAR2 \w+ \| .*null")
+        # Une vue : le profil porte sur sa table (SAMPLE refuse, ou accepte, selon la vue).
+        self.assertIn("Profil sur", describe_table("SDEINT.V_P_TIERS"))
+
     def test_get_operation_reads_the_int_view(self):
         result = get_operation("P_TIERS")
         self.assertIn("SDE_LOAD.P_TIERS op 1 -> `SDETRG.P_TIERS`", result)
@@ -150,7 +157,7 @@ class OracleExploreTests(unittest.TestCase):
         self.assertIn("P_FLUX", result)
 
     def test_list_operations_of_a_chain(self):
-        result = list_operations(["SDE_LOAD"])
+        result = list_operations("SDE_LOAD")
         self.assertIn("| SDE_LOAD | P_FLUX | 2 |", result)
 
 

@@ -2,11 +2,13 @@
 
 from typing import Annotated
 
+import oracledb
 from pydantic import Field
 
 from vivia.oracle import client
 from vivia.oracle import format as fmt
 from vivia.oracle.identifiers import ResolutionError, resolve
+from vivia.oracle.profile import profile_of_the_day
 from vivia.tools.explore import queries
 
 
@@ -20,6 +22,9 @@ def describe_table(
     ],
 ) -> str:
     """Fiche d'une table ou vue : colonnes, cle, index uniques, partitionnement, volumetrie, zone.
+
+    Chaque colonne porte un profil calcule sur un echantillon : part de nulls, valeurs distinctes,
+    valeurs frequentes des colonnes de codes, bornes, valeurs sentinelles (9999-12-31, -1...).
 
     Accepte "SCHEMA.TABLE" ou un nom seul (ambiguite levee si plusieurs schemas correspondent).
     Les operations qui l'alimentent (index hors ligne) et sa fiche de doc arriveront plus tard.
@@ -50,4 +55,10 @@ def describe_table(
         _, text = client.fetch(queries.DESCRIBE_TABLE_VIEW_TEXT, params)
         view_text = text[0][0] if text else None
 
-    return fmt.describe_table_report(obj, cols, pk, uniques, part, partition_kind, view_text)
+    try:  # le profil enrichit la fiche : sa panne ne doit jamais la faire echouer
+        profile = profile_of_the_day(obj.schema, obj.name, tuple((c, t) for c, t, _, _ in cols))
+    except oracledb.DatabaseError as err:
+        profile = f"Profil non calcule ({fmt.oracle_error(err)})."
+    return fmt.describe_table_report(
+        obj, cols, pk, uniques, part, partition_kind, view_text, profile
+    )

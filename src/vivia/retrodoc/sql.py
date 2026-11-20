@@ -29,7 +29,4 @@ COLUMNS = """
     ORDER BY c.column_id
 """
 
-# {stats} : COUNT(col), APPROX_COUNT_DISTINCT(col) par colonne ; {source} : table ou echantillon.
-PROFILE = "SELECT COUNT(*), {stats} FROM (SELECT * FROM {source} FETCH FIRST 100000 ROWS ONLY)"
-
 EXAMPLES = "SELECT * FROM {table} FETCH FIRST 5 ROWS ONLY"

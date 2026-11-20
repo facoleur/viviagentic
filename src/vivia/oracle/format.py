@@ -8,6 +8,7 @@ import re
 import oracledb
 
 from vivia.oracle import glossary
+from vivia.oracle.profile import SENTINELS
 
 MAX_CHARS = 8000  # ~2000 tokens
 
@@ -146,12 +147,56 @@ def unknown_object(obj) -> str:
     return f"Erreur : {obj} introuvable. Utiliser search_objects pour verifier le nom."
 
 
-def describe_table_report(obj, cols, pk, uniques, part, partition_kind, view_text) -> str:
+def _pct(share: float) -> str:
+    return "<1 %" if 0 < share < 0.005 else f"{share:.0%}".replace("%", " %")
+
+
+def _short(value) -> str:
+    return str(value)[:10] if hasattr(value, "year") else str(value)[:24]
+
+
+def profile_text(s: dict, rows: int) -> str:
+    """Une colonne profilee en une ligne : nulls, valeurs, bornes, signalements."""
+    if s["non_null"] == 0:
+        return "vide (100 % null)"
+    parts = [f"{_pct(1 - s['non_null'] / rows)} null"]
+    if s["distinct"] == 1 and s["non_null"] == rows:
+        return f"constante : {_short(s['min'])}"
+    if s["values"]:
+        top = ", ".join(
+            f"{_short(v)}{' (sentinelle)' if str(v).upper() in SENTINELS else ''} {_pct(n / rows)}"
+            for v, n in s["values"]
+        )
+        parts.append(f"{s['distinct']} valeurs : {top}")
+    else:
+        unique = s["non_null"] == rows and s["distinct"] >= 0.99 * rows and rows >= 20
+        parts.append("unique (cle candidate)" if unique else f"~{s['distinct']} valeurs")
+    if s["kind"] != "text":
+        parts.append(f"min {_short(s['min'])}, max {_short(s['max'])}")
+    if s["kind"] == "num" and s["x"]:
+        parts.append(f"{_pct(s['x'] / rows)} negatifs")
+    if s["kind"] == "date" and s["x"]:
+        parts.append(f"{_pct(s['x'] / rows)} a {_short(s['max'])} (sentinelle)")
+    if s["kind"] == "date" and s["y"]:
+        parts.append(f"{_pct(s['y'] / rows)} <= 1900-01-01 (sentinelle)")
+    return ", ".join(parts)
+
+
+def describe_table_report(
+    obj, cols, pk, uniques, part, partition_kind, view_text, profile=None
+) -> str:
+    """`profile` : le dict de `oracle.profile.profile`, ou un texte qui dit pourquoi il manque."""
     lines = [f"## {obj}", "", f"Zone/type : {glossary.zone_type(obj.schema)}", "", "### Colonnes"]
-    lines += [
-        f"- `{c}` {t}{' NULL' if n == 'Y' else ' NOT NULL'}{f' — {m}' if m else ''}"
-        for c, t, n, m in cols
-    ]
+    if isinstance(profile, dict):
+        how = "echantillon de 1 % des blocs" if profile["sampled"] else "premieres lignes"
+        lines.append(f"Profil sur {profile['rows']} lignes ({how}) apres le signe |.")
+    elif profile:
+        lines.append(profile)
+    for c, t, n, m in cols:
+        line = f"- `{c}` {t}{' NULL' if n == 'Y' else ' NOT NULL'}{f' — {m}' if m else ''}"
+        if isinstance(profile, dict) and profile["rows"] and c in profile["columns"]:
+            line += f" | {profile_text(profile['columns'][c], profile['rows'])}"
+        lines.append(line)
     if pk:
         lines += ["", "### Cle primaire", ", ".join(c for (c,) in pk)]
     if uniques:
@@ -291,20 +336,20 @@ def search_operations_report(texte: str, rows: list[tuple], limit: int) -> str:
     if not rows:
         return f"Aucune operation ne contient « {texte} »."
     lines = [f"## Operations contenant « {texte} »"]
-    for *head, sql in rows:
+    for *head, sql in rows[:limit]:
         lines.append(f"- {_operation_title(*head)}")
         lines_sql = enumerate((sql or "").splitlines(), 1)
         hits = [(i, ln) for i, ln in lines_sql if texte.upper() in ln.upper()]
         lines += [f"  - l.{i} : `{ln.strip()[:160]}`" for i, ln in hits[:3]]
         if len(hits) > 3:
             lines.append(f"  - ... {len(hits) - 3} autres lignes")
-    if len(rows) == limit:
-        lines.append(f"\n(limite de {limit} atteinte : affiner `texte` ou `chaines`)")
+    if len(rows) > limit:
+        lines.append(f"\n(plus de {limit} operations : affiner `texte`)")
     return truncate("\n".join(lines))
 
 
-def list_operations_report(chaines: list[str], rows: list[tuple], limit: int) -> str:
+def list_operations_report(chaine: str, flux: str | None, rows: list[tuple], limit: int) -> str:
     if not rows:
-        return f"Aucune operation pour les chaines {', '.join(chaines)}."
+        return f"Aucune operation pour {chaine}{f'.{flux}' if flux else ''}."
     columns = ["chaine", "flux", "op", "description", "table cible", "lignes SQL"]
     return markdown_table(columns, rows, limit)

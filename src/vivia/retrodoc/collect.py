@@ -4,12 +4,12 @@ import re
 from collections import Counter
 
 from vivia.oracle.client import fetch
+from vivia.oracle.profile import profile_of_the_day
 from vivia.retrodoc import sql
 from vivia.tools.explore.framework import union
 from vivia.tools.explore.queries import DESCRIBE_TABLE_PK, VIEW_TABLES
 
 ALL = 10_000_000  # pas de plafond de lignes pour ces requetes
-LOBS = ("CLOB", "NCLOB", "BLOB", "LONG", "XMLTYPE")
 DOC_ZONES = ("SDA", "SDE")
 
 
@@ -75,24 +75,17 @@ def describe(col: str, typ: str, comment: str | None) -> str:
 
 
 def profile(table: str, cols: dict) -> tuple[int, list[dict]]:
-    """Taux de nulls et cardinalite sur 1 % des lignes ; toute la table si elle est petite."""
-    measured = [c for c, (t, _) in cols.items() if t not in LOBS]
-    stats = ", ".join(
-        ["COUNT(*)", *(f'COUNT("{c}"), APPROX_COUNT_DISTINCT("{c}")' for c in measured)]
-    )
-    for source in (f"{table} SAMPLE (1)", table):
-        _, [row] = fetch(sql.PROFILE.format(stats=stats, source=source))
-        if row[0] >= 1000:
-            break
-    pairs = zip(row[1::2], row[2::2], strict=True)
-    n, found = row[0], dict(zip(measured, pairs, strict=True))
+    """Taux de nulls et cardinalite : le profil commun a describe_table, au format de la doc."""
+    owner, name = table.split(".")
+    result = profile_of_the_day(owner, name, tuple((c, t) for c, (t, _) in cols.items()))
+    n, stats = (result["rows"], result["columns"]) if result else (0, {})
     return n, [
         {
             "nom": c,
             "type": t,
             "commentaire": m,
-            "taux_null": round(1 - found[c][0] / n, 3) if c in found and n else None,
-            "cardinalite": found[c][1] if c in found else None,
+            "taux_null": round(1 - stats[c]["non_null"] / n, 3) if c in stats and n else None,
+            "cardinalite": stats[c]["distinct"] if c in stats else None,
         }
         for c, (t, m) in cols.items()
     ]

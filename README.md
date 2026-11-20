@@ -204,8 +204,9 @@ dans `ALL_VIEWS`). Si une
 colonne porte un autre nom en prod, l'erreur liste les colonnes reelles ; le dictionnaire
 `COLUMNS` du meme fichier fait la correspondance (`chaine` -> `CHAIN_NAME`, ...).
 `get_operation` (SQL d'un flux ou d'une operation, 200 000 caracteres au plus),
-`search_operations` (nom de flux, description et SQL, avec les lignes trouvees),
-`list_operations` (operations d'une ou plusieurs chaines). `get_dependencies("P_FLUX")` :
+`search_operations(texte)` (nom de flux, description et SQL, avec les lignes trouvees),
+`list_operations(chaine, flux)` (numero, description, table cible, taille du SQL ; toute la
+chaine si le flux est omis). `get_dependencies("P_FLUX")` :
 `SELECT source_name ... WHERE target_name = 'P_FLUX'`, puis la meme recherche pour chaque
 source trouvee, 3 niveaux au plus ; graphe Mermaid. Noms exacts des tables,
 sans schema.
@@ -218,6 +219,14 @@ ORACLE_DSN=localhost:1521/FREEPDB1 ORACLE_USER=AGENT ORACLE_PASSWORD=Welcome_1 \
 
 Sans ce conteneur, `tests/test_oracle_explore.py` se saute proprement (`unittest.SkipTest`) ;
 `test_sql_guard.py` et `test_oracle_identifiers.py` tournent sans base.
+
+`describe_table` profile chaque colonne sur un echantillon (`oracle/profile.py`) : les statistiques
+Oracle sont vides, tout est calcule sur les donnees. Echantillon = 1 % des blocs (100 000 lignes
+au plus), ou les 100 000 premieres lignes si la table est petite ou si SAMPLE est refuse (vue
+complexe). Par colonne : nulls, valeurs distinctes, bornes, valeurs frequentes des colonnes de
+codes (30 valeurs ou moins) et valeurs sentinelles (`9999-12-31`, `-1`, `N/A`... : liste
+`SENTINELS`). Aucun parametre : un echec du profil n'empeche jamais la fiche. Garde en memoire
+pour la journee ; la retro-doc utilise le meme calcul.
 
 ## Lineage SQL
 

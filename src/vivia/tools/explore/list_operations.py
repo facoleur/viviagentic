@@ -1,23 +1,30 @@
-"""Liste des operations ELT d'une ou plusieurs chaines, dans l'ordre d'execution."""
+"""Operations ELT d'un flux (ou de toute une chaine), dans l'ordre d'execution."""
 
 from typing import Annotated
 
 from pydantic import Field
 
 from vivia.oracle import format as fmt
-from vivia.tools.explore.operations import fetch_operations, in_list
+from vivia.tools.explore.operations import fetch_operations
+
+LIMIT = 500
 
 
 def list_operations(
-    chaines: Annotated[list[str], Field(description="Chaines a lister (ex. ['SDE_LOAD']).")],
-    limite: Annotated[int, Field(description="Nombre maximal d'operations.", ge=1, le=1000)] = 100,
+    chaine: Annotated[str, Field(description="Chaine (ex. 'SDE_LOAD').")],
+    flux: Annotated[
+        str | None, Field(description="Flux de la chaine (ex. 'P_TIERS'). Omis = toute la chaine.")
+    ] = None,
 ) -> str:
-    """Operations des chaines : flux, numero, description, table cible, taille du SQL.
+    """Operations d'un flux : numero, description, table cible, nombre de lignes de SQL.
 
-    Exemple : list_operations(["SDE_LOAD", "DMD_LOAD"])
+    Exemple : list_operations("SDE_LOAD", "P_TIERS")
     """
-    params: dict = {}
-    where = [in_list("chaine", chaines, params)]
-    nb_lines = "REGEXP_COUNT(sql_text, CHR(10)) + 1"
-    rows = fetch_operations(where, params, last_col=nb_lines, max_rows=limite)
-    return fmt.list_operations_report(chaines, rows, limite)
+    where, params = ["chaine = :chaine"], {"chaine": chaine.strip().upper()}
+    if flux:
+        where.append("flux = :flux")
+        params["flux"] = flux.strip().upper()
+    rows = fetch_operations(
+        where, params, last_col="REGEXP_COUNT(sql_text, CHR(10)) + 1", max_rows=LIMIT + 1
+    )
+    return fmt.list_operations_report(chaine, flux, rows, LIMIT)

@@ -64,16 +64,25 @@ class OperationToolsTests(unittest.TestCase):
         self.assertIn("sql_text, validity_end_date FROM SDEINT.V_M_OPERATION", sql)
 
     def test_search_in_sql_shows_numbered_matching_lines(self):
-        result = search_operations("nvl(", chaines=["sde_load"])
+        result = search_operations("nvl(")
         self.assertIn("l.2 : `NVL(SEGMENT, 'X') SEGMENT`", result)
         sql, params = self.calls[-1]
-        self.assertIn("OR UPPER(sql_text) LIKE :needle) AND chaine IN (:chaine_0)", sql)
-        self.assertEqual(params, {"needle": "%NVL(%", "chaine_0": "SDE_LOAD"})
+        self.assertIn("UPPER(flux) LIKE :needle OR UPPER(operation_description) LIKE", sql)
+        self.assertIn("UPPER(sql_text) LIKE :needle", sql)
+        self.assertEqual(params, {"needle": "%NVL(%"})
 
     def test_list_operations_counts_sql_lines_without_fetching_the_sql(self):
-        result = list_operations(["SDE_LOAD", "DMD_LOAD"])
+        result = list_operations("sde_load", "p_tiers")
         self.assertIn("| SDE_LOAD | P_TIERS | 1 | Alimente P_TIERS | SDETRG.P_TIERS | 3 |", result)
-        self.assertIn("chaine IN (:chaine_0, :chaine_1)", self.calls[-1][0])
+        sql, params = self.calls[-1]
+        self.assertIn("chaine = :chaine AND flux = :flux", sql)
+        self.assertEqual(params, {"chaine": "SDE_LOAD", "flux": "P_TIERS"})
+
+    def test_list_operations_of_a_whole_chain_when_no_flux_is_given(self):
+        list_operations("SDE_LOAD")
+        sql, params = self.calls[-1]
+        self.assertNotIn("flux = :flux", sql)
+        self.assertEqual(params, {"chaine": "SDE_LOAD"})
 
     def test_level_one_is_the_direct_sources_only(self):
         result = get_dependencies("f_ope")
