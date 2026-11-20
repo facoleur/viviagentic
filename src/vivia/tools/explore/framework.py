@@ -15,8 +15,15 @@ SCHEMAS = ("SDEINT", "DMDINT")
 
 # Nom interne (celui des requetes des tools) -> colonne reelle de la vue, quand elle differe.
 # Seul endroit a adapter : `union` selectionne `reelle AS interne`.
-# Exemple : COLUMNS = {OPERATIONS: {"chaine": "CHAIN_NAME", "flux": "FLOW_NAME"}}
-COLUMNS: dict[str, dict[str, str]] = {}
+# target_table est sans schema ; target_schema peut etre un template (#schema#), non utilise.
+COLUMNS: dict[str, dict[str, str]] = {
+    OPERATIONS: {
+        "chaine": "chain_name",
+        "flux": "flow_name",
+        "table_cible": "target_table",
+        "sql_text": "operation",
+    },
+}
 
 
 @cache

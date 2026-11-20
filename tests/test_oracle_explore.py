@@ -149,7 +149,7 @@ class OracleExploreTests(unittest.TestCase):
 
     def test_get_operation_reads_the_int_view(self):
         result = get_operation("P_TIERS")
-        self.assertIn("SDE_LOAD.P_TIERS op 1 -> `SDETRG.P_TIERS`", result)
+        self.assertIn("SDE_LOAD.P_TIERS op 1 -> `P_TIERS`", result)
         self.assertIn("FROM SDAINT.V_TIERS", result)
 
     def test_search_operations_finds_a_table_read_in_the_sql(self):

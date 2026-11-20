@@ -21,9 +21,10 @@ TRAC = {
 }
 
 
-REAL_COLUMNS = [
-    "CHAINE", "FLUX", "OPERATION_NR", "OPERATION_DESCRIPTION", "TABLE_CIBLE", "SQL_TEXT",
-    "SOURCE_NAME", "TARGET_NAME", "VALIDITY_END_DATE",
+REAL_COLUMNS = [  # colonnes des vues du framework en prod
+    "CHAIN_NAME", "FLOW_NAME", "OPERATION_NR", "OPERATION", "OPERATION_DESCRIPTION",
+    "TARGET_SCHEMA", "TARGET_TABLE", "VALIDITY_END_DATE", "INSTRUCTION",
+    "SOURCE_APPLICATION_CODE", "SOURCE_NAME", "TARGET_NAME", "TARGET_TYPE",
 ]  # fmt: skip
 
 
@@ -61,7 +62,8 @@ class OperationToolsTests(unittest.TestCase):
         get_operation("P_TIERS")
         sql = self.calls[-1][0]
         self.assertIn("WHERE validity_end_date > SYSDATE AND flux = :flux", sql)
-        self.assertIn("sql_text, validity_end_date FROM SDEINT.V_M_OPERATION", sql)
+        self.assertIn("chain_name AS chaine, flow_name AS flux, operation_nr", sql)
+        self.assertIn("target_table AS table_cible, operation AS sql_text, validity_end_date", sql)
 
     def test_search_in_sql_shows_numbered_matching_lines(self):
         result = search_operations("nvl(")
@@ -97,6 +99,12 @@ class OperationToolsTests(unittest.TestCase):
         self.assertNotIn("W_AGG --> W_AGG", result)
         targets = [p["target"] for s, p in self.calls if p and "target" in p]
         self.assertEqual(targets, ["F_OPE", "P_TIERS", "W_AGG", "TIERS"])
+
+    def test_only_current_trac_data_is_read(self):
+        get_dependencies("F_OPE")
+        sql = self.calls[-1][0]
+        self.assertIn("target_name = :target AND validity_end_date > SYSDATE", sql)
+        self.assertIn("SELECT source_name, target_name, validity_end_date FROM SDEINT", sql)
 
     def test_framework_views_are_read_from_the_discovered_schemas(self):
         get_dependencies("F_OPE")

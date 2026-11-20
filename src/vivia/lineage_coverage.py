@@ -254,7 +254,7 @@ def load(cibles: list[str], limit: int | None) -> tuple[list[tuple], dict, dict]
     for owner, table, column, data_type in rows:
         columns.setdefault(owner, {}).setdefault(table, {})[column] = data_type
     sql = queries.TRAC_DATA_ALL.format(
-        source=framework.union(framework.TRAC_DATA, "source_name, target_name")
+        source=framework.union(framework.TRAC_DATA, "source_name, target_name, validity_end_date")
     )
     trac: dict[str, set[str]] = {}
     for target, source in client.fetch(sql, max_rows=ALL, max_seconds=LOAD_SECONDS)[1]:

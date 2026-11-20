@@ -21,7 +21,7 @@ def get_dependencies(
     Exemple : get_dependencies("F_OPERATION"), ou get_dependencies("P_FLUX", niveaux=2)
     """
     sql = queries.TRAC_DATA_SOURCES.format(
-        source=framework.union(framework.TRAC_DATA, "source_name, target_name")
+        source=framework.union(framework.TRAC_DATA, "source_name, target_name, validity_end_date")
     )
     root = table.strip().upper()
     edges, level, seen = [], [root], set()
