@@ -5,7 +5,11 @@ from vivia.tools.explore import framework, queries
 
 
 def fetch_operations(
-    where: list[str], params: dict, last_col: str = "sql_text", max_rows: int = 1000
+    where: list[str],
+    params: dict,
+    last_col: str = "sql_text",
+    max_rows: int = 1000,
+    max_seconds: float | None = None,
 ) -> list[tuple]:
     """(chaine, flux, operation_nr, description, table_cible, `last_col`), filtres en AND."""
     sql = queries.OPERATIONS.format(
@@ -13,7 +17,7 @@ def fetch_operations(
         source=framework.union(framework.OPERATIONS, f"{queries.OPERATION_COLUMNS}, sql_text"),
         where=" AND ".join(where) or "1 = 1",
     )
-    return client.fetch(sql, params, max_rows=max_rows)[1]
+    return client.fetch(sql, params, max_rows=max_rows, max_seconds=max_seconds)[1]
 
 
 def by_flux(flux: str, operation_nr: int | None, chaine: str | None) -> tuple[list[str], dict]:

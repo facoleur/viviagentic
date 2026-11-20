@@ -96,3 +96,12 @@ def test_select_only_script_with_target():
         {"source": "#SCH#.SRC.ID", "target": "#SCH#.DST.ID"},
         {"source": "#SCH#.SRC.MT", "target": "#SCH#.DST.MT"},
     ]
+
+
+def test_insert_without_column_list_uses_the_dictionary_order():
+    schema = {"S": {"V": {"ID": "N", "NOM": "V"}}, "T": {"X": {"A": "N", "B": "V"}}}
+    edges = lineage("INSERT INTO T.X SELECT v.ID, v.NOM FROM S.V v", columns=True, schema=schema)
+    assert edges == [
+        {"source": "S.V.ID", "target": "T.X.A"},
+        {"source": "S.V.NOM", "target": "T.X.B"},
+    ]

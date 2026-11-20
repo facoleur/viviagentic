@@ -272,6 +272,18 @@ uv run vivia-retrodoc run -j 2            # documente la selection (ou : run SDE
 - Corrections humaines : `overrides/SCHEMA.TABLE.json`, fusionne par-dessus le resultat.
 - Le LLM n'est rappele que si le SQL, le schema, les sources ou le glossaire changent.
 
+### Couverture du lignage colonne
+
+`uv run vivia-lineage-coverage` (lecture seule) analyse **toutes** les operations de
+`V_M_OPERATION` avec le dictionnaire `ALL_TAB_COLUMNS` (qui developpe les `*` et nomme les
+colonnes d'un `INSERT` sans liste), puis resume : operations analysees, en erreur, en timeout ou
+non analysables (PL/SQL, `INSERT ALL`, `WITH FUNCTION`) ; part des colonnes cibles avec une
+source, derriere un `*` non developpe, ou sans source (constante, `COUNT(*)` ou echec) ; temps
+par operation ; tables lues absentes du dictionnaire ; sources lues absentes de `V_M_TRAC_DATA`.
+Une ligne JSON par operation dans `artifacts/lineage_coverage/report.jsonl`. Options : tables
+cibles en arguments, `-n` (nombre d'operations), `-j` (processus), `-t` (secondes par operation,
+Unix). Sert a decider si le lignage colonne est assez fiable avant de construire le graphe.
+
 ## Tests
 
 ```sh

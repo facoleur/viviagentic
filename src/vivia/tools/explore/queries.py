@@ -32,6 +32,16 @@ TRAC_DATA_SOURCES = (
     "SELECT DISTINCT source_name FROM ({source}) WHERE target_name = :target ORDER BY source_name"
 )
 
+# Dictionnaire des schemas zone + type, colonnes dans l'ordre de la table (COLUMN_ID).
+DICTIONARY_COLUMNS = (
+    "SELECT owner, table_name, column_name, data_type FROM all_tab_columns "
+    "WHERE REGEXP_LIKE(owner, '^(SDA|SDE|DMD)(STG|TRG|INT)$') "
+    "ORDER BY owner, table_name, column_id"
+)
+
+# Toutes les sources declarees, par cible ({source} : `framework.union`).
+TRAC_DATA_ALL = "SELECT DISTINCT target_name, source_name FROM ({source})"
+
 # Vue -> table(s) qu'elle lit : les flux lisent SDEINT.V_X, ecrit dans SDETRG.X.
 VIEW_TABLES = (
     "SELECT owner || '.' || name, referenced_owner || '.' || referenced_name "

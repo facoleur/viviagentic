@@ -18,6 +18,7 @@ dependencies = [
 vivia-mcp = "vivia.mcp:main"
 vivia-configure = "vivia.configure:main"
 vivia-lineage = "lineage:main"
+vivia-lineage-coverage = "vivia.lineage_coverage:main"
 vivia-retrodoc = "vivia.retrodoc.cli:main"
 
 [dependency-groups]

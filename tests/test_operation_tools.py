@@ -34,6 +34,7 @@ class OperationToolsTests(unittest.TestCase):
             return [], [(*OP, last)]
 
         framework.schemas.cache_clear()
+        self.addCleanup(framework.schemas.cache_clear)  # ne pas laisser les schemas simules
         patcher = mock.patch.object(client, "fetch", fetch)
         patcher.start()
         self.addCleanup(patcher.stop)
