@@ -20,7 +20,7 @@ from contextlib import contextmanager
 from sqlglot import exp
 from sqlglot.schema import ensure_schema
 
-from lineage import lineage
+from lineage import lineage, mask_templates
 from vivia.configure.client import ROOT
 from vivia.oracle import client
 from vivia.tools.explore import framework, queries
@@ -97,14 +97,25 @@ def short_error(err: Exception) -> str:
     return f"{type(err).__name__}: {' '.join(text.split())}"[:160]
 
 
+def odd_templates(sql: str) -> list[str]:
+    """Formes de `#` que le masquage ne reconnait pas : hors `#MOT#`, `NUM#`, chaines."""
+    text = re.sub(r"'(?:[^']|'')*'|--[^\n]*|/\*.*?\*/", " ", mask_templates(sql), flags=re.S)
+    return sorted({m[0].lower() for m in re.finditer(r"(?<![\w$])#[^\s,;()=]{0,30}", text)})[:5]
+
+
 def error_context(err: Exception) -> str | None:
     """SQL autour de l'erreur d'analyse, sur une ligne, l'endroit fautif entre « »."""
     errors = getattr(err, "errors", None)
     if not errors:
         return None
     e = errors[0]
-    text = f"{e['start_context'][-70:]}«{e['highlight']}»{e['end_context'][:40]}"
-    return " ".join(text.split())
+
+    def clean(text: str) -> str:  # SQL d'origine (TPL#x# -> #x#), caracteres non ASCII visibles
+        return ascii(" ".join(text.replace("TPL#", "#").split()))[1:-1]
+
+    return (
+        f"{clean(e['start_context'][-70:])}«{clean(e['highlight'])}»{clean(e['end_context'][:40])}"
+    )
 
 
 def op_id(op: tuple) -> str:
@@ -126,6 +137,7 @@ def _analyze(job: tuple) -> dict:
     out = {"op": op_id(op), "cible": cible, "lignes": sql.count("\n") + 1}
     if kind := next((k for k, rx in UNSUPPORTED.items() if rx.search(sql)), None):
         return out | {"statut": f"non_analysable:{kind}"}
+    out["templates"] = odd_templates(sql)
     target = target_of(cible) or None  # sans cible : seuls les INSERT/MERGE nomment leur table
     start = time.perf_counter()
     try:
@@ -214,6 +226,9 @@ def summarize(rows: list[dict]) -> str:
         lines.append(f"  {count:4} x {message}")
         if message in example:
             lines.append(f"         ex. {example[message]}")
+    odd = Counter(t for r in rows for t in r.get("templates", ()))
+    lines += ["", "Formes de # non reconnues par le masquage (operations concernees) :"]
+    lines += [f"  {v:4} x {k}" for k, v in odd.most_common(10)]
     unknown = Counter(t for r in ok for t in r["inconnues"])
     lines += ["", "Tables lues absentes du dictionnaire :"]
     lines += [f"  {v:4} x {k}" for k, v in unknown.most_common(10)]

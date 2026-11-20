@@ -71,6 +71,7 @@ class AnalyzeTests(unittest.TestCase):
         self.assertNotIn("line:", row["message"])
         self.assertIn("«", row["contexte"])
         self.assertIn("#", row["contexte"])
+        self.assertNotIn("TPL", row["contexte"])  # le SQL d'origine, pas le SQL masque
 
     def test_insert_naming_its_table_without_schema_still_matches_the_dictionary(self):
         # TABLE_CIBLE resolue en SDETRG.T_DL, mais l'INSERT ecrit `INSERT INTO T_DL`.
@@ -78,6 +79,14 @@ class AnalyzeTests(unittest.TestCase):
             op("INSERT INTO T_DL (ID) SELECT t.ID_TIERS FROM SDEINT.V_P_TIERS t", "T_DL")
         )
         self.assertEqual((row["colonnes"], row["exactes"], row["sans_source"]), (2, 1, 1))
+
+    def test_unrecognised_hash_forms_are_listed_not_the_usual_ones(self):
+        usual = "SELECT NUM#, #pndate#, '#x y#' FROM #sdestg#.#tab# WHERE a = 1 -- #z q#"
+        self.assertEqual(cov.odd_templates(usual), [])
+        odd = 'SELECT 1 FROM #sdestg#.#"work_instr"# t, #a-b# u'
+        self.assertEqual(cov.odd_templates(odd), ['#"work_instr"#', "#a-b#"])
+        row = cov.analyze(op(f"INSERT INTO T (A) {odd}"))
+        self.assertEqual(row["templates"], ['#"work_instr"#', "#a-b#"])
 
     def test_dl_columns_are_counted_apart(self):
         sql = "INSERT INTO T_DL (ID, DL_DATE) SELECT t.ID_TIERS, SYSDATE FROM SDEINT.V_P_TIERS t"
