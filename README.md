@@ -199,7 +199,8 @@ d'`ALL_DEPENDENCIES`/`ALL_SOURCE` pour `find_usages`/`get_source`) se degradent 
 sans jamais faire planter l'outil.
 
 Vues du framework (`V_M_OPERATION`, `V_M_TRAC_DATA`, `V_M_FLOWDATA`) : leurs schemas sont
-decouverts dans `ALL_VIEWS` (`tools/explore/framework.py`), rien n'est code en dur. Si une
+lues dans `SDEINT` et `DMDINT` seulement (`SCHEMAS` de `tools/explore/framework.py`, verifies
+dans `ALL_VIEWS`). Si une
 colonne porte un autre nom en prod, l'erreur liste les colonnes reelles ; le dictionnaire
 `COLUMNS` du meme fichier fait la correspondance (`chaine` -> `CHAIN_NAME`, ...).
 `get_operation` (SQL d'un flux ou d'une operation, 200 000 caracteres au plus),

@@ -259,3 +259,17 @@ class FrameworkColumnsTests(unittest.TestCase):
         message = str(ctx.exception)
         self.assertIn("SDEINT.V_X : colonne(s) chaine absente(s)", message)
         self.assertIn("Colonnes reelles : CHAIN_NAME, FLOW_NAME, OPERATION_NR, SQL_TEXT", message)
+
+
+class FrameworkSchemasTests(unittest.TestCase):
+    def test_only_sdeint_and_dmdint_are_read(self):
+        rows = [("AUTREINT",), ("DMDINT",), ("SDAINT",), ("SDEINT",)]
+        framework.schemas.cache_clear()
+        self.addCleanup(framework.schemas.cache_clear)
+        with mock.patch.object(client, "fetch", lambda sql, params=None: ([], rows)):
+            self.assertEqual(framework.schemas("V_M_OPERATION"), ("DMDINT", "SDEINT"))
+        framework.schemas.cache_clear()
+        only_sda = lambda sql, params=None: ([], [("SDAINT",)])  # noqa: E731
+        with mock.patch.object(client, "fetch", only_sda), self.assertRaises(LookupError) as ctx:
+            framework.schemas("V_M_OPERATION")
+        self.assertIn("SDEINT, DMDINT", str(ctx.exception))

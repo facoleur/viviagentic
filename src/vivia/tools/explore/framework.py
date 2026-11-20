@@ -9,6 +9,10 @@ OPERATIONS = "V_M_OPERATION"
 TRAC_DATA = "V_M_TRAC_DATA"
 FLOWDATA = "V_M_FLOWDATA"
 
+# Schemas lus pour les vues du framework (SDA n'en a pas). Les autres schemas qui exposent la
+# meme vue sont ignores.
+SCHEMAS = ("SDEINT", "DMDINT")
+
 # Nom interne (celui des requetes des tools) -> colonne reelle de la vue, quand elle differe.
 # Seul endroit a adapter : `union` selectionne `reelle AS interne`.
 # Exemple : COLUMNS = {OPERATIONS: {"chaine": "CHAIN_NAME", "flux": "FLOW_NAME"}}
@@ -17,11 +21,12 @@ COLUMNS: dict[str, dict[str, str]] = {}
 
 @cache
 def schemas(view: str) -> tuple[str, ...]:
-    """Schemas qui exposent `view` (ex. SDEINT, DMDINT), lus une fois dans ALL_VIEWS."""
+    """Schemas de `SCHEMAS` qui exposent `view`, verifies une fois dans ALL_VIEWS."""
     _, rows = client.fetch(queries.VIEW_OWNERS, {"name": view})
-    if not rows:
-        raise LookupError(f"vue {view} introuvable dans ALL_VIEWS (nom ou droits a verifier)")
-    return tuple(owner for (owner,) in rows)
+    owners = tuple(owner for (owner,) in rows if owner in SCHEMAS)
+    if not owners:
+        raise LookupError(f"vue {view} introuvable dans {', '.join(SCHEMAS)} (nom ou droits ?)")
+    return owners
 
 
 @cache
