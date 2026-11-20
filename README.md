@@ -284,7 +284,8 @@ non analysables (PL/SQL, `INSERT ALL`, `WITH FUNCTION`) ; part des colonnes cibl
 source, derriere un `*` non developpe, ou sans source (constante, `COUNT(*)` ou echec) ; temps
 par operation ; tables lues absentes du dictionnaire ; sources lues absentes de `V_M_TRAC_DATA`.
 Une ligne JSON par operation dans `artifacts/lineage_coverage/report.jsonl`, ecrite au fil de
-l'eau : `--resume` reprend apres un arret en sautant les operations deja faites. Une operation
+l'eau : `--resume` reprend apres un arret : il saute les operations reussies et refait celles en erreur
+(utile apres une correction du parseur). Une operation
 sans table cible est analysee si c'est un `INSERT`/`MERGE`, sinon marquee `sans_cible`. Options : tables
 cibles en arguments, `-n` (nombre d'operations), `-j` (processus), `-t` (secondes par operation,
 Unix). Le resume donne un extrait du SQL pour chaque erreur d'analyse frequente, et separe les colonnes

@@ -146,6 +146,19 @@ class MainTests(unittest.TestCase):
         lines = (out / "report.jsonl").read_text().splitlines()
         self.assertEqual([json.loads(x)["op"] for x in lines], ["CH.F1.1", "CH.F2.1"])
 
+    def test_resume_retries_the_operations_in_error(self):
+        bad = ("CH", "F1", 1, None, "T", "SELECT FROM WHERE (((")
+        good = ("CH", "F2", 1, None, "T", "SELECT t.* FROM SDEINT.V_P_TIERS t")
+        out = self.run_main([bad, good])
+        status = [json.loads(x)["statut"] for x in (out / "report.jsonl").read_text().splitlines()]
+        self.assertEqual(status, ["erreur", "ok"])
+
+        with mock.patch.object(cov, "analyze", wraps=cov.analyze) as analyze:
+            self.run_main_again(out, [bad, good])
+        self.assertEqual(analyze.call_count, 1)  # seule l'operation en erreur est refaite
+        lines = (out / "report.jsonl").read_text().splitlines()
+        self.assertEqual(sorted(json.loads(x)["op"] for x in lines), ["CH.F1.1", "CH.F2.1"])
+
     def run_main_again(self, out, ops):
         with (
             mock.patch.object(cov, "OUT", out),

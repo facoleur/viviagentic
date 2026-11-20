@@ -256,7 +256,7 @@ def main() -> None:
     parser.add_argument("-j", type=int, default=4, help="processus en parallele")
     parser.add_argument("-t", "--timeout", type=int, default=60, help="secondes par operation")
     parser.add_argument(
-        "--resume", action="store_true", help="saute les operations deja dans report.jsonl"
+        "--resume", action="store_true", help="reprend report.jsonl : refait seulement les erreurs"
     )
     args = parser.parse_args()
 
@@ -264,12 +264,21 @@ def main() -> None:
     print(f"{len(ops)} operations, {sum(map(len, columns.values()))} tables au dictionnaire")
     OUT.mkdir(parents=True, exist_ok=True)
     report = OUT / "report.jsonl"
-    rows = [json.loads(x) for x in report.read_text().splitlines()] if args.resume else []
+    kept = (
+        [json.loads(x) for x in report.read_text().splitlines()]
+        if args.resume and report.exists()
+        else []
+    )
+    rows = [
+        r for r in kept if r["statut"] != "erreur"
+    ]  # les erreurs sont refaites : le code change
     done = {r["op"] for r in rows}
     jobs = [(op, args.timeout) for op in ops if op_id(op) not in done]
     print(f"{len(jobs)} a analyser, {len(done)} deja faites", file=sys.stderr)
     pool = ProcessPoolExecutor(args.j, initializer=init, initargs=(columns, trac))
-    with report.open("a" if args.resume else "w") as out, pool:
+    with report.open("w") as out, pool:
+        for row in rows:
+            out.write(json.dumps(row, ensure_ascii=False) + "\n")
         for i, row in enumerate(pool.map(analyze, jobs, chunksize=1), 1):
             rows.append(row)
             out.write(json.dumps(row, ensure_ascii=False) + "\n")
