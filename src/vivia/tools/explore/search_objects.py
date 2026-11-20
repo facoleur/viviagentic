@@ -6,6 +6,7 @@ from pydantic import Field
 
 from vivia.oracle import client
 from vivia.oracle import format as fmt
+from vivia.tools.errors import guarded
 from vivia.tools.explore import queries
 
 _DEFAULT_LIMIT = 25
@@ -14,6 +15,7 @@ _DEFAULT_LIMIT = 25
 _Zone = Literal["SDA", "SDE", "DMD"]
 
 
+@guarded
 def search_objects(
     texte: Annotated[
         str,

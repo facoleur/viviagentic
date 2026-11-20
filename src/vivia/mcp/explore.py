@@ -8,7 +8,6 @@ from vivia.tools.explore.compare_sql import compare_sql as _compare_sql
 from vivia.tools.explore.compile_sql import compile_sql as _compile_sql
 from vivia.tools.explore.describe_table import describe_table as _describe_table
 from vivia.tools.explore.distinct_values import distinct_values as _distinct_values
-from vivia.tools.explore.find_usages import find_usages as _find_usages
 from vivia.tools.explore.find_verified_query import find_verified_query as _find_verified_query
 from vivia.tools.explore.get_dependencies import get_dependencies as _get_dependencies
 from vivia.tools.explore.get_operation import get_operation as _get_operation
@@ -27,7 +26,6 @@ mcp.tool(_search_objects, name="search_objects")
 mcp.tool(_run_select, name="run_select")
 mcp.tool(_check_grain, name="check_grain")
 mcp.tool(_column_stats, name="column_stats")
-mcp.tool(_find_usages, name="find_usages")
 mcp.tool(_get_source, name="get_source")
 mcp.tool(_compare_sql, name="compare_sql")
 mcp.tool(_distinct_values, name="distinct_values")

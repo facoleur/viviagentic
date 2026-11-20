@@ -46,13 +46,15 @@ class SemanticLayerOracleTests(unittest.TestCase):
         result = distinct_values("NOPE_TABLE_XYZ", "col")
         self.assertIn("Erreur", result)
 
-    def test_get_dependencies_lists_every_source(self):
-        # F_OPERATION a deux sources dans TRAC_DATA (voir docker/oracle-test/init.sql).
+    def test_get_dependencies_lists_every_current_source_with_its_zone(self):
+        # F_OPERATION a deux sources en cours et une source perimee (voir docker/oracle-test).
         result = get_dependencies("F_OPERATION")
-        self.assertIn("P_FLUX --> F_OPERATION", result)
-        self.assertNotIn("P_ANCIEN", result)  # source dont la validite est terminee (init.sql)
-        self.assertIn("P_TIERS --> F_OPERATION", result)
-        self.assertIn("MOUVEMENT --> P_FLUX", get_dependencies("F_OPERATION", niveaux=2))
+        self.assertIn("- `P_FLUX` (SDE)", result)
+        self.assertIn("- `P_TIERS` (SDE)", result)
+        self.assertNotIn("P_ANCIEN", result)
+
+    def test_get_dependencies_of_a_staging_flux_reads_its_sources_only(self):
+        self.assertIn("- `P_FLUX` (SDE)", get_dependencies("STG_FLUX"))
 
     def test_get_dependencies_on_a_root_table_is_empty(self):
         result = get_dependencies("TIERS")

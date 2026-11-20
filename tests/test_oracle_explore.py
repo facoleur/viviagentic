@@ -8,7 +8,6 @@ from vivia.tools.explore.column_stats import column_stats
 from vivia.tools.explore.compare_sql import compare_sql
 from vivia.tools.explore.compile_sql import compile_sql
 from vivia.tools.explore.describe_table import describe_table
-from vivia.tools.explore.find_usages import find_usages
 from vivia.tools.explore.get_operation import get_operation
 from vivia.tools.explore.get_source import get_source
 from vivia.tools.explore.list_operations import list_operations
@@ -94,10 +93,6 @@ class OracleExploreTests(unittest.TestCase):
         result = column_stats("DMDTRG.D_TIERS", ["segment"], filtre="1=1")
         self.assertIn("SEGMENT", result.upper())
 
-    def test_find_usages_on_a_known_table(self):
-        result = find_usages("DMDTRG.D_TIERS")
-        self.assertIn("Dependances", result)
-
     def test_get_source_reports_an_unknown_object_cleanly(self):
         result = get_source("NOPE_PACKAGE_XYZ")
         self.assertIn("Erreur", result)
@@ -142,10 +137,11 @@ class OracleExploreTests(unittest.TestCase):
 
     def test_describe_table_profiles_each_column_on_a_sample(self):
         result = describe_table("SDETRG.P_TIERS")
-        self.assertIn("Profil sur", result)
+        self.assertIn("Lignes :", result)
+        self.assertNotIn("blocs", result)
         self.assertRegex(result, r"- `SEGMENT` VARCHAR2 \w+ \| .*null")
         # Une vue : le profil porte sur sa table (SAMPLE refuse, ou accepte, selon la vue).
-        self.assertIn("Profil sur", describe_table("SDEINT.V_P_TIERS"))
+        self.assertIn("Lignes :", describe_table("SDEINT.V_P_TIERS"))
 
     def test_expired_operation_versions_and_sda_operations_are_not_read(self):
         # init.sql : P_TIERS a une version perimee (fin de validite en 2020) ; SDA sans framework.

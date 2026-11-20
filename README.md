@@ -184,32 +184,35 @@ plutot qu'estime.
 
 ## Exploration Oracle
 
-`src/vivia/mcp/explore.py` expose 8 outils de lecture du DWH Oracle (compte lecture seule) :
-`compile_sql`, `describe_table`, `search_objects`, `run_select`, `check_grain`, `column_stats`,
-`find_usages`, `get_source`, et d'autres. La connexion (`src/vivia/oracle/client.py`, `python-oracledb` en
+`src/vivia/mcp/explore.py` expose 15 outils de lecture du DWH Oracle (compte lecture seule),
+un fichier par outil dans `src/vivia/tools/explore/` : `compile_sql`, `run_select`,
+`describe_table`, `search_objects`, `check_grain`, `column_stats`, `distinct_values`, `get_source`,
+`compare_sql`, `get_operation`, `search_operations`, `list_operations`, `get_dependencies`,
+`glossary`, `find_verified_query`. La connexion (`src/vivia/oracle/client.py`, `python-oracledb` en
 mode thin, pas de client Oracle a installer) lit `ORACLE_DSN`, `ORACLE_USER`, `ORACLE_PASSWORD`
 (obligatoires), `ORACLE_CALL_TIMEOUT_MS` et `ORACLE_MAX_ROWS` (optionnels) dans l'environnement.
+
+Chaque outil est decore par `@guarded` (`tools/errors.py`) : une erreur ne remonte jamais en
+exception mais en texte que l'agent peut exploiter (objet inconnu, SQL rejete, erreur Oracle avec
+un conseil sur la suite a donner, bug interne). Les conseils par code ORA sont dans `oracle/format.py`.
 
 Aucun outil n'a besoin de plus que `SELECT` : pas d'`EXPLAIN PLAN`, pas de DDL/DML, pas
 d'AWR/ASH/Diagnostics Pack. `compile_sql` et `run_select` valident le SQL libre par `sqlglot`
 (dialecte `oracle`, une seule instruction `SELECT`/`WITH`) avant toute execution, templates
 `#NOM#` masques puis restaures (`lineage.mask_templates`, partage avec le lineage SQL). Les
-privileges optionnels (`DBMS_STATS.CONVERT_RAW_VALUE` pour `column_stats`, visibilite
-d'`ALL_DEPENDENCIES`/`ALL_SOURCE` pour `find_usages`/`get_source`) se degradent proprement,
-sans jamais faire planter l'outil.
+privilege optionnel (`DBMS_STATS.CONVERT_RAW_VALUE` pour `column_stats`, visibilite d'`ALL_SOURCE`
+pour `get_source`) se degrade proprement, sans jamais faire planter l'outil.
 
-Vues du framework (`V_M_OPERATION`, `V_M_TRAC_DATA`, `V_M_FLOWDATA`) : leurs schemas sont
-lues dans `SDEINT` et `DMDINT` seulement (`SCHEMAS` de `tools/explore/framework.py`, verifies
-dans `ALL_VIEWS`). Si une
-colonne porte un autre nom en prod, l'erreur liste les colonnes reelles ; le dictionnaire
-`COLUMNS` du meme fichier fait la correspondance (`chaine` -> `CHAIN_NAME`, ...).
+Vues du framework (`V_M_OPERATION`, `V_M_TRAC_DATA`, `V_M_FLOWDATA`) : lues dans `SDEINT` et
+`DMDINT` seulement (`SCHEMAS` de `tools/explore/framework.py`, verifies dans `ALL_VIEWS`), avec
+les vrais noms de colonnes de la prod (`chain_name`, `flow_name`, `operation` pour le SQL,
+`target_table`, `validity_end_date`...) et seulement les versions en cours de validite. Si une
+colonne manque, l'erreur liste les colonnes reelles.
 `get_operation` (SQL d'un flux ou d'une operation, 200 000 caracteres au plus),
 `search_operations(texte)` (nom de flux, description et SQL, avec les lignes trouvees),
 `list_operations(chaine, flux)` (numero, description, table cible, taille du SQL ; toute la
-chaine si le flux est omis). `get_dependencies("P_FLUX")` :
-`SELECT source_name ... WHERE target_name = 'P_FLUX'`, puis la meme recherche pour chaque
-source trouvee, 3 niveaux au plus ; graphe Mermaid. Noms exacts des tables,
-sans schema.
+chaine si le flux est omis). `get_dependencies("P_FLUX")` : un seul `SELECT` sur `V_M_TRAC_DATA`
+(`target_name`), les sources avec leur zone ; pour remonter, rappeler l'outil sur une source.
 
 ```sh
 docker compose -f docker/oracle-test/docker-compose.yml up -d   # Oracle Free, schemas zone+type
@@ -220,12 +223,13 @@ ORACLE_DSN=localhost:1521/FREEPDB1 ORACLE_USER=AGENT ORACLE_PASSWORD=Welcome_1 \
 Sans ce conteneur, `tests/test_oracle_explore.py` se saute proprement (`unittest.SkipTest`) ;
 `test_sql_guard.py` et `test_oracle_identifiers.py` tournent sans base.
 
-`describe_table` profile chaque colonne sur un echantillon (`oracle/profile.py`) : les statistiques
-Oracle sont vides, tout est calcule sur les donnees. Echantillon = 1 % des blocs (100 000 lignes
-au plus), ou les 100 000 premieres lignes si la table est petite ou si SAMPLE est refuse (vue
-complexe). Par colonne : nulls, valeurs distinctes, bornes, valeurs frequentes des colonnes de
-codes (30 valeurs ou moins) et valeurs sentinelles (`9999-12-31`, `-1`, `N/A`... : liste
-`SENTINELS`). Aucun parametre : un echec du profil n'empeche jamais la fiche. Garde en memoire
+`describe_table` donne le nombre de lignes (`COUNT(*)` ; estime a partir de l'echantillon si le
+comptage depasse 20 s) et profile chaque colonne sur un echantillon des donnees
+(`oracle/profile.py`), sans les statistiques Oracle (vides) : echantillon aleatoire de 100 000
+lignes au plus, ou les 100 000 premieres lignes si la table est petite ou si SAMPLE est refuse (vue
+complexe) ; la fiche dit lequel. Par colonne : nulls, valeurs distinctes (`APPROX_COUNT_DISTINCT`,
+a 1-2 % pres), bornes, valeurs frequentes des colonnes de codes (30 valeurs ou moins) et valeurs
+sentinelles (`9999-12-31`, `-1`, `N/A`... : liste `SENTINELS`). Aucun parametre. Garde en memoire
 pour la journee ; la retro-doc utilise le meme calcul.
 
 ## Lineage SQL

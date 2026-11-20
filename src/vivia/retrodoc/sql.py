@@ -8,14 +8,17 @@ TRAC = ("V_M_TRAC_DATA", "chaine, flux, table_cible, table_source")
 # Frequence de chargement par flux.
 FLOWS = ("V_M_FLOWDATA", "chain_name, flow_name, load_frequency")
 
-OPS = ("V_M_OPERATION", "chaine, flux, operation_nr, table_cible, sql_text, validity_end_date")
+OPS = (
+    "V_M_OPERATION",
+    "chain_name, flow_name, operation_nr, target_table, operation, validity_end_date",
+)
 
 # Toutes les operations des flux qui ecrivent dans :t (tables intermediaires comprises).
 OPERATIONS = """
     WITH ops AS (SELECT * FROM ({source}) WHERE validity_end_date > SYSDATE)
-    SELECT chaine, flux, operation_nr, table_cible, sql_text FROM ops
-    WHERE (chaine, flux) IN (SELECT chaine, flux FROM ops WHERE table_cible = :t)
-    ORDER BY chaine, flux, operation_nr
+    SELECT chain_name, flow_name, operation_nr, target_table, operation FROM ops
+    WHERE (chain_name, flow_name) IN (SELECT chain_name, flow_name FROM ops WHERE target_table = :t)
+    ORDER BY chain_name, flow_name, operation_nr
 """
 
 TABLE_COMMENT = "SELECT comments FROM all_tab_comments WHERE owner = :owner AND table_name = :name"

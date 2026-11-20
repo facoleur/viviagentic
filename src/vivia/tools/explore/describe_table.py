@@ -7,13 +7,15 @@ from pydantic import Field
 
 from vivia.oracle import client
 from vivia.oracle import format as fmt
-from vivia.oracle.identifiers import ResolutionError, resolve
+from vivia.oracle.identifiers import resolve
 from vivia.oracle.profile import profile_of_the_day
+from vivia.tools.errors import guarded
 from vivia.tools.explore import queries
 
 
+@guarded
 def describe_table(
-    name: Annotated[
+    table: Annotated[
         str,
         Field(
             description="Table ou vue a decrire, 'SCHEMA.TABLE' ou nom seul (erreur si ambigu "
@@ -21,9 +23,10 @@ def describe_table(
         ),
     ],
 ) -> str:
-    """Fiche d'une table ou vue : colonnes, cle, index uniques, partitionnement, volumetrie, zone.
+    """Fiche d'une table ou vue : nombre de lignes, colonnes profilees, cle, index uniques.
 
-    Chaque colonne porte un profil calcule sur un echantillon : part de nulls, valeurs distinctes,
+    Le nombre de lignes est compte (COUNT(*)) ; chaque colonne porte un profil calcule sur un
+    echantillon des donnees, sans les statistiques Oracle : part de nulls, valeurs distinctes,
     valeurs frequentes des colonnes de codes, bornes, valeurs sentinelles (9999-12-31, -1...).
 
     Accepte "SCHEMA.TABLE" ou un nom seul (ambiguite levee si plusieurs schemas correspondent).
@@ -31,10 +34,7 @@ def describe_table(
 
     Exemple : describe_table("DMDTRG.D_TIERS")
     """
-    try:
-        obj = resolve(name)
-    except ResolutionError as err:
-        return f"Erreur : {err}"
+    obj = resolve(table)
 
     params = {"owner": obj.schema, "name": obj.name}
     _, cols = client.fetch(queries.DESCRIBE_TABLE_COLUMNS, params)

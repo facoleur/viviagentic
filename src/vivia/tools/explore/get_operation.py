@@ -5,9 +5,11 @@ from typing import Annotated
 from pydantic import Field
 
 from vivia.oracle import format as fmt
+from vivia.tools.errors import guarded
 from vivia.tools.explore.operations import by_flux, fetch_operations
 
 
+@guarded
 def get_operation(
     flux: Annotated[str, Field(description="Nom du flux (ex. 'P_TIERS').")],
     operation_nr: Annotated[

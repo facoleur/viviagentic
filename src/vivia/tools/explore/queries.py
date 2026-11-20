@@ -25,19 +25,20 @@ VIEW_OWNERS = "SELECT owner FROM all_views WHERE view_name = :name ORDER BY owne
 
 VIEW_COLUMNS = "SELECT owner, column_name FROM all_tab_columns WHERE table_name = :name"
 
-OPERATION_COLUMNS = "chaine, flux, operation_nr, operation_description, table_cible"
+OPERATION_COLUMNS = "chain_name, flow_name, operation_nr, operation_description, target_table"
 
-# {cols} : colonnes a ramener (dont sql_text ou un calcul dessus) ; {where} : filtre du tool.
+# {cols} : colonnes a ramener (dont `operation`, le SQL, ou un calcul dessus) ; {where} : filtre.
 # Seules les versions en cours de validite (M_OPERATION garde l'historique).
 OPERATIONS = (
     "SELECT {cols} FROM ({source}) WHERE validity_end_date > SYSDATE AND {where} "
-    "ORDER BY chaine, flux, operation_nr"
+    "ORDER BY chain_name, flow_name, operation_nr"
 )
 
 # Sources en cours de validite d'une cible (le flux porte le nom de sa table).
 TRAC_DATA_SOURCES = (
-    "SELECT DISTINCT source_name FROM ({source}) "
-    "WHERE target_name = :target AND validity_end_date > SYSDATE ORDER BY source_name"
+    "SELECT DISTINCT source_application_code, source_name FROM ({source}) "
+    "WHERE target_name = :target AND validity_end_date > SYSDATE "
+    "ORDER BY source_application_code, source_name"
 )
 
 # Dictionnaire des schemas zone + type, colonnes dans l'ordre de la table (COLUMN_ID).
@@ -85,8 +86,7 @@ DESCRIBE_TABLE_UNIQUE_INDEXES = """
 """
 
 DESCRIBE_TABLE_VOLUMETRY = (
-    "SELECT partitioned, num_rows, last_analyzed FROM all_tables "
-    "WHERE owner = :owner AND table_name = :name"
+    "SELECT partitioned FROM all_tables WHERE owner = :owner AND table_name = :name"
 )
 
 DESCRIBE_TABLE_PARTITION_KIND = (
@@ -94,16 +94,6 @@ DESCRIBE_TABLE_PARTITION_KIND = (
 )
 
 DESCRIBE_TABLE_VIEW_TEXT = "SELECT text FROM all_views WHERE owner = :owner AND view_name = :name"
-
-FIND_USAGES_DEPENDENCIES = (
-    "SELECT owner, name, type FROM all_dependencies "
-    "WHERE referenced_owner = :owner AND referenced_name = :name FETCH FIRST :lim ROWS ONLY"
-)
-
-FIND_USAGES_SOURCE = (
-    "SELECT owner, name, type, line FROM all_source WHERE UPPER(text) LIKE :needle "
-    "FETCH FIRST :lim ROWS ONLY"
-)
 
 GET_SOURCE = (
     "SELECT line, text FROM all_source WHERE owner = :owner AND name = :name "

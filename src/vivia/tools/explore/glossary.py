@@ -5,8 +5,10 @@ from typing import Annotated
 from pydantic import Field
 
 from vivia.oracle.glossary import define
+from vivia.tools.errors import guarded
 
 
+@guarded
 def glossary(
     terme: Annotated[
         str,

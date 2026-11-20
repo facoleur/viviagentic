@@ -13,18 +13,6 @@ FLOWDATA = "V_M_FLOWDATA"
 # meme vue sont ignores.
 SCHEMAS = ("SDEINT", "DMDINT")
 
-# Nom interne (celui des requetes des tools) -> colonne reelle de la vue, quand elle differe.
-# Seul endroit a adapter : `union` selectionne `reelle AS interne`.
-# target_table est sans schema ; target_schema peut etre un template (#schema#), non utilise.
-COLUMNS: dict[str, dict[str, str]] = {
-    OPERATIONS: {
-        "chaine": "chain_name",
-        "flux": "flow_name",
-        "table_cible": "target_table",
-        "sql_text": "operation",
-    },
-}
-
 
 @cache
 def schemas(view: str) -> tuple[str, ...]:
@@ -46,18 +34,15 @@ def columns_of(view: str) -> dict[str, tuple[str, ...]]:
 def union(view: str, columns: str) -> str:
     """`view` de tous les schemas qui l'exposent, comme une seule source SQL.
 
-    `columns` : noms internes separes par des virgules. Une colonne absente d'un schema donne une
-    erreur qui liste les colonnes reelles, au lieu d'un ORA-00904 sans contexte.
+    Une colonne absente d'un schema donne une erreur qui liste les colonnes reelles, au lieu
+    d'un ORA-00904 sans contexte.
     """
     wanted = [c.strip() for c in columns.split(",")]
-    real = {c: COLUMNS.get(view, {}).get(c, c) for c in wanted}
     for schema, available in columns_of(view).items():
-        missing = [r for r in real.values() if r.upper() not in available]
+        missing = [c for c in wanted if c.upper() not in available]
         if missing:
             raise LookupError(
                 f"{schema}.{view} : colonne(s) {', '.join(missing)} absente(s). "
-                f"Colonnes reelles : {', '.join(available)}. "
-                "Adapter COLUMNS dans vivia/tools/explore/framework.py."
+                f"Colonnes reelles : {', '.join(available)}."
             )
-    select = ", ".join(c if r == c else f"{r} AS {c}" for c, r in real.items())
-    return " UNION ALL ".join(f"SELECT {select} FROM {s}.{view}" for s in schemas(view))
+    return " UNION ALL ".join(f"SELECT {columns} FROM {s}.{view}" for s in schemas(view))

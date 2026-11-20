@@ -247,7 +247,7 @@ def load(cibles: list[str], limit: int | None) -> tuple[list[tuple], dict, dict]
     """Operations, dictionnaire et TRAC_DATA, lus en base."""
     where, params = [], {}
     if cibles:
-        where.append(in_list("table_cible", cibles, params))
+        where.append(in_list("target_table", cibles, params))
     ops = fetch_operations(where, params, max_rows=limit or ALL, max_seconds=LOAD_SECONDS)
     columns: dict = {}
     _, rows = client.fetch(queries.DICTIONARY_COLUMNS, max_rows=ALL, max_seconds=LOAD_SECONDS)

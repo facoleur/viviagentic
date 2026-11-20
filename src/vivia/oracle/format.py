@@ -3,12 +3,10 @@
 Seul module a produire du texte affiche : les tools n'assemblent pas de Markdown eux-memes.
 """
 
-import re
-
 import oracledb
 
 from vivia.oracle import glossary
-from vivia.oracle.profile import SENTINELS
+from vivia.oracle.profile import MAX_ROWS, SENTINELS
 
 MAX_CHARS = 8000  # ~2000 tokens
 
@@ -35,10 +33,30 @@ def truncate(text: str, limit: int = MAX_CHARS) -> str:
     return text[:limit] + f"\n\n… tronque a {limit} caracteres, preciser la demande."
 
 
-def oracle_error(err: oracledb.DatabaseError) -> str:
-    """Format commun d'un DatabaseError (code + message), sans contexte additionnel."""
-    (error,) = err.args
-    return f"{error.full_code} : {error.message.strip()}"
+_TIMEOUT = "Delai depasse : restreindre la requete (filtre, moins de colonnes ou de lignes)."
+_HINTS = {  # conseil par erreur Oracle : ce que l'agent peut essayer ensuite
+    "ORA-00942": "Table ou vue inexistante ou non accessible : verifier le nom (search_objects).",
+    "ORA-00904": "Colonne ou nom invalide : lister les colonnes avec describe_table.",
+    "ORA-01031": "Droits insuffisants sur cet objet.",
+    "ORA-01013": _TIMEOUT,
+    "DPY-4024": _TIMEOUT,
+    "DPY-6005": "Connexion a la base impossible : prevenir l'administrateur.",
+}
+
+
+def oracle_error(err: oracledb.Error) -> str:
+    """Erreur Oracle : code, message, et un conseil quand on en connait un."""
+    error = err.args[0] if err.args else None
+    code = getattr(error, "full_code", None) or type(err).__name__
+    message = " ".join(str(getattr(error, "message", err)).split())
+    return " ".join(filter(None, [f"Erreur Oracle {code} : {message}", _HINTS.get(code)]))
+
+
+def internal_error(tool: str, err: Exception) -> str:
+    return (
+        f"Erreur interne dans {tool} ({type(err).__name__} : {err}). "
+        "Reformuler la demande ; si elle persiste, prevenir l'administrateur."
+    )
 
 
 # --- run_select --------------------------------------------------------------------------------
@@ -147,6 +165,27 @@ def unknown_object(obj) -> str:
     return f"Erreur : {obj} introuvable. Utiliser search_objects pour verifier le nom."
 
 
+def _n(n: int) -> str:
+    return f"{n:,}".replace(",", " ")
+
+
+def volume_text(profile: dict) -> str:
+    """Nombre total de lignes, puis ce sur quoi le profil est calcule."""
+    total = _n(profile["total"])
+    count = {
+        "exact": total,
+        "estime": f"~{total} (estimation)",
+        "minimum": f"au moins {total}",
+    }[profile["total_kind"]]
+    if profile["sampled"]:
+        scope = f"un echantillon aleatoire de {_n(profile['rows'])} lignes"
+    elif profile["rows"] >= MAX_ROWS:
+        scope = f"les {_n(profile['rows'])} premieres lignes (non aleatoire)"
+    else:
+        scope = "toutes les lignes"
+    return f"Lignes : {count}. Profil (apres le signe |) calcule sur {scope}."
+
+
 def _pct(share: float) -> str:
     return "<1 %" if 0 < share < 0.005 else f"{share:.0%}".replace("%", " %")
 
@@ -170,7 +209,7 @@ def profile_text(s: dict, rows: int) -> str:
         parts.append(f"{s['distinct']} valeurs : {top}")
     else:
         unique = s["non_null"] == rows and s["distinct"] >= 0.99 * rows and rows >= 20
-        parts.append("unique (cle candidate)" if unique else f"~{s['distinct']} valeurs")
+        parts.append("unique sur l'echantillon" if unique else f"~{s['distinct']} valeurs")
     if s["kind"] != "text":
         parts.append(f"min {_short(s['min'])}, max {_short(s['max'])}")
     if s["kind"] == "num" and s["x"]:
@@ -188,8 +227,7 @@ def describe_table_report(
     """`profile` : le dict de `oracle.profile.profile`, ou un texte qui dit pourquoi il manque."""
     lines = [f"## {obj}", "", f"Zone/type : {glossary.zone_type(obj.schema)}", "", "### Colonnes"]
     if isinstance(profile, dict):
-        how = "echantillon de 1 % des blocs" if profile["sampled"] else "premieres lignes"
-        lines.append(f"Profil sur {profile['rows']} lignes ({how}) apres le signe |.")
+        lines.append(volume_text(profile))
     elif profile:
         lines.append(profile)
     for c, t, n, m in cols:
@@ -205,42 +243,10 @@ def describe_table_report(
             groups.setdefault(idx, []).append(col)
         lines += ["", "### Index uniques"]
         lines += [f"- `{idx}` ({', '.join(cs)})" for idx, cs in groups.items()]
-    if part:
-        partitioned, num_rows, last_analyzed = part[0]
-        partitioning = partition_kind if partitioned == "YES" else "aucun"
-        lines += [
-            "",
-            "### Volumetrie",
-            f"partitionnement : {partitioning} ; "
-            f"num_rows : {num_rows if num_rows is not None else 'non analyse'} ; "
-            f"last_analyzed : {last_analyzed or 'jamais'}",
-        ]
-    elif view_text:
+    if view_text:
         lines += ["", "### Vue (ce qu'elle lit)", f"```sql\n{view_text}\n```"]
-    return "\n".join(lines)
-
-
-# --- find_usages -----------------------------------------------------------------------------
-
-
-def find_usages_report(obj, deps, source) -> str:
-    lines = [f"## Dependances de {obj}"]
-    if deps:
-        lines += [f"- `{o}.{n}` ({t})" for o, n, t in deps]
-    else:
-        lines.append(
-            "Aucune trouvee dans ALL_DEPENDENCIES — soit aucun code PL/SQL visible ne le cite, "
-            "soit l'acces a cette vue est restreint pour ce compte."
-        )
-    lines += ["", f"## Code source citant {obj.name}"]
-    if source:
-        lines += [f"- `{o}.{n}` ({t}), ligne {line}" for o, n, t, line in source]
-    else:
-        lines.append(
-            "Aucune occurrence dans ALL_SOURCE — soit aucun objet PL/SQL ne le cite, soit "
-            "l'acces a cette vue est restreint pour ce compte."
-        )
-    lines += ["", "Operations ELT qui le citent : pas encore disponible (index phase 2)."]
+    elif part and part[0][0] == "YES":
+        lines += ["", "### Partitionnement", partition_kind]
     return "\n".join(lines)
 
 
@@ -285,17 +291,10 @@ def distinct_values_report(col: str, rows: list[tuple], limit: int) -> str:
 # --- get_dependencies ----------------------------------------------------------------------------
 
 
-def _node(name: str) -> str:
-    """Identifiant Mermaid : lettres, chiffres et _ seulement."""
-    return re.sub(r"\W", "_", name)
-
-
-def dependencies_graph(root: str, edges: list[tuple[str, str]]) -> str:
-    """Graphe Mermaid source --> cible."""
-    if not edges:
-        return f"Aucune source dans V_M_TRAC_DATA pour {root}."
-    arrows = [f"  {_node(s)} --> {_node(t)}" for s, t in dict.fromkeys(edges) if s != t]
-    return truncate("\n".join([f"## Sources de {root}", "```mermaid", "graph LR", *arrows, "```"]))
+def dependencies_report(table: str, rows: list[tuple]) -> str:
+    if not rows:
+        return f"Aucune source declaree dans V_M_TRAC_DATA pour {table}."
+    return "\n".join([f"## Sources de {table}", *(f"- `{name}` ({zone})" for zone, name in rows)])
 
 
 # --- operations --------------------------------------------------------------------------------

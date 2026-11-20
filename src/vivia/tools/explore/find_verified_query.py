@@ -6,9 +6,12 @@ from typing import Annotated
 
 from pydantic import Field
 
+from vivia.tools.errors import guarded
+
 _QUERIES = tomllib.loads(Path(__file__).with_name("verified_queries.toml").read_text())["queries"]
 
 
+@guarded
 def find_verified_query(
     texte: Annotated[
         str,

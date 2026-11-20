@@ -5,12 +5,14 @@ from typing import Annotated
 from pydantic import Field
 
 from vivia.oracle import format as fmt
+from vivia.tools.errors import guarded
 from vivia.tools.explore.operations import fetch_operations
 
-_FIELDS = ("flux", "operation_description", "sql_text")
+_FIELDS = ("flow_name", "operation_description", "operation")
 LIMIT = 25
 
 
+@guarded
 def search_operations(
     texte: Annotated[
         str,

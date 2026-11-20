@@ -2,17 +2,18 @@
 
 from typing import Annotated
 
-import oracledb
 from pydantic import Field
 
 from vivia.oracle import client
 from vivia.oracle import format as fmt
-from vivia.oracle.sql_guard import RejectedSQL, ensure_single_select
+from vivia.oracle.sql_guard import ensure_single_select
+from vivia.tools.errors import guarded
 from vivia.tools.explore import queries
 
 _DEFAULT_MAX_ROWS = 50
 
 
+@guarded
 def run_select(
     sql: Annotated[
         str,
@@ -36,14 +37,7 @@ def run_select(
 
     Exemple : run_select("SELECT * FROM DMDTRG.D_TIERS", max_rows=10)
     """
-    try:
-        ensure_single_select(sql)
-    except RejectedSQL as err:
-        return f"Rejete : {err}"
-
-    try:
-        capped = queries.RUN_SELECT_CAPPED.format(sql=sql, max_rows=int(max_rows))
-        columns, rows = client.fetch(capped, max_rows=max_rows)
-    except oracledb.DatabaseError as err:
-        return fmt.oracle_error(err)
+    ensure_single_select(sql)
+    capped = queries.RUN_SELECT_CAPPED.format(sql=sql, max_rows=int(max_rows))
+    columns, rows = client.fetch(capped, max_rows=max_rows)
     return fmt.run_select_table(columns, rows, max_rows)

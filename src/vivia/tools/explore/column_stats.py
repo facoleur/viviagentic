@@ -12,8 +12,9 @@ from pydantic import Field
 
 from vivia.oracle import client
 from vivia.oracle import format as fmt
-from vivia.oracle.identifiers import ResolutionError, ensure_identifier, resolve
-from vivia.oracle.sql_guard import RejectedSQL, ensure_safe_fragment
+from vivia.oracle.identifiers import ensure_identifier, resolve
+from vivia.oracle.sql_guard import ensure_safe_fragment
+from vivia.tools.errors import guarded
 from vivia.tools.explore import queries
 
 
@@ -27,6 +28,7 @@ def _fetch_stats(obj: str, cols: tuple[str, ...], filtre: str) -> tuple[list[str
     return client.fetch(queries.COLUMN_STATS_LIVE.format(selects=selects, obj=obj, filtre=filtre))
 
 
+@guarded
 def column_stats(
     table: Annotated[
         str, Field(description="Table ou vue a analyser, 'SCHEMA.NOM' ou nom seul si non ambigu.")
@@ -50,13 +52,10 @@ def column_stats(
 
     Exemple : column_stats("DMDTRG.D_TIERS", ["segment", "pays"])
     """
-    try:
-        obj = resolve(table)
-        cols = tuple(ensure_identifier(c) for c in colonnes)
-        if filtre:
-            ensure_safe_fragment(filtre)
-    except (ResolutionError, ValueError, RejectedSQL) as err:
-        return f"Erreur : {err}"
+    obj = resolve(table)
+    cols = tuple(ensure_identifier(c) for c in colonnes)
+    if filtre:
+        ensure_safe_fragment(filtre)
 
     columns, rows = _fetch_stats(str(obj), cols, filtre or "1=1")
     return fmt.column_stats_live(cols, columns, rows)

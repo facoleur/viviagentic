@@ -6,13 +6,15 @@ from pydantic import Field
 
 from vivia.oracle import client
 from vivia.oracle import format as fmt
-from vivia.oracle.identifiers import ResolutionError, ensure_identifier, resolve
-from vivia.oracle.sql_guard import RejectedSQL, ensure_safe_fragment
+from vivia.oracle.identifiers import ensure_identifier, resolve
+from vivia.oracle.sql_guard import ensure_safe_fragment
+from vivia.tools.errors import guarded
 from vivia.tools.explore import queries
 
 _FILTER_REQUIRED_ABOVE = 1_000_000  # num_rows au-dela duquel un filtre devient obligatoire
 
 
+@guarded
 def check_grain(
     table: Annotated[
         str, Field(description="Table ou vue a verifier, 'SCHEMA.NOM' ou nom seul si non ambigu.")
@@ -38,13 +40,10 @@ def check_grain(
 
     Exemple : check_grain("DMDTRG.D_TIERS", ["id_tiers"])
     """
-    try:
-        obj = resolve(table)
-        keys = ", ".join(ensure_identifier(c) for c in colonnes_cle)
-        if filtre:
-            ensure_safe_fragment(filtre)
-    except (ResolutionError, ValueError, RejectedSQL) as err:
-        return f"Erreur : {err}"
+    obj = resolve(table)
+    keys = ", ".join(ensure_identifier(c) for c in colonnes_cle)
+    if filtre:
+        ensure_safe_fragment(filtre)
 
     _, size = client.fetch(queries.CHECK_GRAIN_NUM_ROWS, {"o": obj.schema, "t": obj.name})
     num_rows = size[0][0] if size and size[0][0] is not None else None

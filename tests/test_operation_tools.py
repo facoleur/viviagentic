@@ -13,12 +13,7 @@ from vivia.tools.explore.search_operations import search_operations
 
 SQL = "SELECT ID_TIERS,\n  NVL(SEGMENT, 'X') SEGMENT\nFROM SDAINT.V_TIERS"
 OP = ("SDE_LOAD", "P_TIERS", 1, "Alimente P_TIERS", "SDETRG.P_TIERS")
-TRAC = {
-    "F_OPE": [("P_TIERS",), ("W_AGG",)],
-    "P_TIERS": [("TIERS",)],
-    "W_AGG": [("W_AGG",), ("P_TIERS",)],  # boucle sur elle-meme, source deja vue
-    "TIERS": [("RAW_TIERS",)],
-}
+TRAC = {"F_OPE": [("SDE", "P_TIERS"), ("SDE", "W_AGG"), ("SDA", "COMPTE")]}
 
 
 REAL_COLUMNS = [  # colonnes des vues du framework en prod
@@ -55,29 +50,28 @@ class OperationToolsTests(unittest.TestCase):
         self.assertIn(SQL, result)
         self.assertIn("SDE_LOAD.P_TIERS op 1 -> `SDETRG.P_TIERS`", result)
         sql, params = self.calls[-1]
-        self.assertIn("operation_nr = :nr AND chaine = :chaine", sql)
+        self.assertIn("operation_nr = :nr AND chain_name = :chaine", sql)
         self.assertEqual(params, {"flux": "P_TIERS", "nr": 1, "chaine": "SDE_LOAD"})
 
     def test_only_versions_still_valid_are_read(self):
         get_operation("P_TIERS")
         sql = self.calls[-1][0]
-        self.assertIn("WHERE validity_end_date > SYSDATE AND flux = :flux", sql)
-        self.assertIn("chain_name AS chaine, flow_name AS flux, operation_nr", sql)
-        self.assertIn("target_table AS table_cible, operation AS sql_text, validity_end_date", sql)
+        self.assertIn("WHERE validity_end_date > SYSDATE AND flow_name = :flux", sql)
+        self.assertIn("operation, validity_end_date FROM SDEINT.V_M_OPERATION", sql)
 
     def test_search_in_sql_shows_numbered_matching_lines(self):
         result = search_operations("nvl(")
         self.assertIn("l.2 : `NVL(SEGMENT, 'X') SEGMENT`", result)
         sql, params = self.calls[-1]
-        self.assertIn("UPPER(flux) LIKE :needle OR UPPER(operation_description) LIKE", sql)
-        self.assertIn("UPPER(sql_text) LIKE :needle", sql)
+        self.assertIn("UPPER(flow_name) LIKE :needle OR UPPER(operation_description) LIKE", sql)
+        self.assertIn("UPPER(operation) LIKE :needle", sql)
         self.assertEqual(params, {"needle": "%NVL(%"})
 
     def test_list_operations_counts_sql_lines_without_fetching_the_sql(self):
         result = list_operations("sde_load", "p_tiers")
         self.assertIn("| SDE_LOAD | P_TIERS | 1 | Alimente P_TIERS | SDETRG.P_TIERS | 3 |", result)
         sql, params = self.calls[-1]
-        self.assertIn("chaine = :chaine AND flux = :flux", sql)
+        self.assertIn("chain_name = :chaine AND flow_name = :flux", sql)
         self.assertEqual(params, {"chaine": "SDE_LOAD", "flux": "P_TIERS"})
 
     def test_list_operations_of_a_whole_chain_when_no_flux_is_given(self):
@@ -86,25 +80,22 @@ class OperationToolsTests(unittest.TestCase):
         self.assertNotIn("flux = :flux", sql)
         self.assertEqual(params, {"chaine": "SDE_LOAD"})
 
-    def test_level_one_is_the_direct_sources_only(self):
+    def test_dependencies_are_one_select_on_the_current_sources_with_their_zone(self):
         result = get_dependencies("f_ope")
-        self.assertIn("P_TIERS --> F_OPE", result)
-        self.assertIn("W_AGG --> F_OPE", result)
-        self.assertNotIn("TIERS --> P_TIERS", result)
+        self.assertEqual(
+            result.splitlines(),
+            ["## Sources de F_OPE", "- `P_TIERS` (SDE)", "- `W_AGG` (SDE)", "- `COMPTE` (SDA)"],
+        )
+        sql, params = self.calls[-1]
+        self.assertIn("WHERE target_name = :target AND validity_end_date > SYSDATE", sql)
+        self.assertIn("SELECT source_application_code, source_name, target_name", sql)
+        self.assertEqual(params, {"target": "F_OPE"})
+        self.assertEqual(len([c for c in self.calls if "target_name = :target" in c[0]]), 1)
 
-    def test_each_level_repeats_the_search_for_every_new_source(self):
-        result = get_dependencies("F_OPE", niveaux=3)
-        self.assertIn("TIERS --> P_TIERS", result)
-        self.assertIn("RAW_TIERS --> TIERS", result)
-        self.assertNotIn("W_AGG --> W_AGG", result)
-        targets = [p["target"] for s, p in self.calls if p and "target" in p]
-        self.assertEqual(targets, ["F_OPE", "P_TIERS", "W_AGG", "TIERS"])
-
-    def test_only_current_trac_data_is_read(self):
-        get_dependencies("F_OPE")
-        sql = self.calls[-1][0]
-        self.assertIn("target_name = :target AND validity_end_date > SYSDATE", sql)
-        self.assertIn("SELECT source_name, target_name, validity_end_date FROM SDEINT", sql)
+    def test_a_table_without_source_says_so(self):
+        self.assertEqual(
+            get_dependencies("RACINE"), "Aucune source declaree dans V_M_TRAC_DATA pour RACINE."
+        )
 
     def test_framework_views_are_read_from_the_discovered_schemas(self):
         get_dependencies("F_OPE")
@@ -258,7 +249,7 @@ class BindNamesTests(unittest.TestCase):
 
 class FrameworkColumnsTests(unittest.TestCase):
     def setUp(self):
-        columns = {"SDEINT": ["CHAIN_NAME", "FLOW_NAME", "OPERATION_NR", "SQL_TEXT"]}
+        columns = {"SDEINT": ["FLOW_NAME", "OPERATION_NR", "OPERATION"]}
         self.patches = [
             mock.patch.object(framework, "schemas", lambda view: ("SDEINT",)),
             mock.patch.object(framework, "columns_of", lambda view: columns),
@@ -267,21 +258,12 @@ class FrameworkColumnsTests(unittest.TestCase):
             patch.start()
             self.addCleanup(patch.stop)
 
-    def test_internal_names_are_mapped_to_the_real_columns(self):
-        with mock.patch.dict(
-            framework.COLUMNS, {"V_X": {"chaine": "CHAIN_NAME", "flux": "FLOW_NAME"}}
-        ):
-            sql = framework.union("V_X", "chaine, flux, operation_nr")
-        self.assertEqual(
-            sql, "SELECT CHAIN_NAME AS chaine, FLOW_NAME AS flux, operation_nr FROM SDEINT.V_X"
-        )
-
     def test_a_missing_column_is_named_with_the_real_columns(self):
         with self.assertRaises(LookupError) as ctx:
-            framework.union("V_X", "chaine, operation_nr")
+            framework.union("V_X", "chain_name, operation_nr")
         message = str(ctx.exception)
-        self.assertIn("SDEINT.V_X : colonne(s) chaine absente(s)", message)
-        self.assertIn("Colonnes reelles : CHAIN_NAME, FLOW_NAME, OPERATION_NR, SQL_TEXT", message)
+        self.assertIn("SDEINT.V_X : colonne(s) chain_name absente(s)", message)
+        self.assertIn("Colonnes reelles : FLOW_NAME, OPERATION_NR, OPERATION", message)
 
 
 class FrameworkSchemasTests(unittest.TestCase):

@@ -12,8 +12,9 @@ import oracledb
 
 from vivia.oracle import client
 
-SAMPLE = "SELECT * FROM {obj} SAMPLE BLOCK (1) SEED (42) FETCH FIRST 100000 ROWS ONLY"
-FIRST = "SELECT * FROM {obj} FETCH FIRST 100000 ROWS ONLY"
+MAX_ROWS = 100_000  # lignes lues au plus pour le profil
+SAMPLE = f"SELECT * FROM {{obj}} SAMPLE BLOCK (1) SEED (42) FETCH FIRST {MAX_ROWS} ROWS ONLY"
+FIRST = f"SELECT * FROM {{obj}} FETCH FIRST {MAX_ROWS} ROWS ONLY"
 MIN_SAMPLE = 1000  # en dessous, l'echantillon par blocs est maigre : on lit le debut de la table
 BATCH = 120  # colonnes par requete (6 expressions chacune ; Oracle limite a 1000 par requete)
 MAX_VALUES = 30  # au plus 30 valeurs distinctes : une colonne de codes, dont on liste les valeurs
@@ -78,11 +79,22 @@ def _frequent(source: str, codes: list[str]) -> dict[str, list[tuple]]:
     return {c: sorted(v, key=lambda x: -x[1])[:5] for c, v in found.items()}
 
 
-def profile(owner: str, name: str, columns: tuple[tuple[str, str], ...]) -> dict | None:
-    """{rows, sampled, columns: {colonne: mesures}} ; None si aucune colonne n'est profilable.
+def _total(obj: str, rows: int, sampled: bool) -> tuple[int, str]:
+    """(nombre de lignes de `obj`, "exact" | "estime" | "minimum")."""
+    if not sampled and rows < MAX_ROWS:
+        return rows, "exact"  # toute la table a ete lue
+    try:
+        return client.fetch(f"SELECT COUNT(*) FROM {obj}", max_seconds=TIMEOUT)[1][0][0], "exact"
+    except oracledb.DatabaseError:  # delai depasse : a defaut, on extrapole l'echantillon
+        return (rows * 100, "estime") if sampled and rows < MAX_ROWS else (rows, "minimum")
 
-    L'echantillon (1 % des blocs, 100 000 lignes au plus) devient les 100 000 premieres lignes
-    quand il est trop petit ou quand SAMPLE est refuse (vue complexe) : `sampled` le dit.
+
+def profile(owner: str, name: str, columns: tuple[tuple[str, str], ...]) -> dict | None:
+    """{rows, sampled, total, total_kind, columns} ; None si aucune colonne n'est profilable.
+
+    `rows` : lignes sur lesquelles le profil est calcule (echantillon de blocs, ou 100 000
+    premieres lignes quand l'echantillon est trop petit ou que SAMPLE est refuse sur une vue) ;
+    `total` : nombre de lignes de l'objet (COUNT(*), a defaut estime : `total_kind`).
     """
     cols = [(c, k) for c, t in columns if (k := kind(t))]
     if not cols:
@@ -104,7 +116,9 @@ def profile(owner: str, name: str, columns: tuple[tuple[str, str], ...]) -> dict
     if rows and codes:
         for c, values in _frequent(source, codes[:MAX_CODES]).items():
             stats[c]["values"] = values
-    return {"rows": rows, "sampled": sampled, "columns": stats}
+    total, total_kind = _total(f"{owner}.{name}", rows, sampled)
+    return {"rows": rows, "sampled": sampled, "total": total, "total_kind": total_kind,
+            "columns": stats}  # fmt: skip
 
 
 @lru_cache(maxsize=64)

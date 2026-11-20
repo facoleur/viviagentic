@@ -6,12 +6,14 @@ from pydantic import Field
 
 from vivia.oracle import client
 from vivia.oracle import format as fmt
-from vivia.oracle.identifiers import ResolutionError, ensure_identifier, resolve
+from vivia.oracle.identifiers import ensure_identifier, resolve
+from vivia.tools.errors import guarded
 from vivia.tools.explore import queries
 
 _DEFAULT_LIMIT = 25
 
 
+@guarded
 def distinct_values(
     table: Annotated[
         str, Field(description="Table ou vue source, 'SCHEMA.NOM' ou nom seul si non ambigu.")
@@ -28,11 +30,8 @@ def distinct_values(
 
     Exemple : distinct_values("SDATRG.MOUVEMENT", "type_mouvement")
     """
-    try:
-        obj = resolve(table)
-        col = ensure_identifier(colonne)
-    except (ResolutionError, ValueError) as err:
-        return f"Erreur : {err}"
+    obj = resolve(table)
+    col = ensure_identifier(colonne)
 
     sql = queries.DISTINCT_VALUES.format(col=col, obj=obj, limit=limite)
     _, rows = client.fetch(sql, max_rows=limite)

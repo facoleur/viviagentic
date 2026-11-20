@@ -6,12 +6,14 @@ from pydantic import Field
 
 from vivia.oracle import client
 from vivia.oracle import format as fmt
-from vivia.oracle.identifiers import ResolutionError, resolve
+from vivia.oracle.identifiers import resolve
+from vivia.tools.errors import guarded
 from vivia.tools.explore import queries
 
 _PAGE = 200
 
 
+@guarded
 def get_source(
     objet: Annotated[
         str,
@@ -35,10 +37,7 @@ def get_source(
 
     Exemple : get_source("PKG_CHARGEMENT", de_ligne=201)
     """
-    try:
-        obj = resolve(objet)
-    except ResolutionError as err:
-        return f"Erreur : {err}"
+    obj = resolve(objet)
 
     haut = min(a_ligne if a_ligne is not None else de_ligne + _PAGE - 1, de_ligne + _PAGE - 1)
     _, rows = client.fetch(

@@ -7,11 +7,13 @@ from pydantic import Field
 
 from vivia.oracle import client
 from vivia.oracle import format as fmt
-from vivia.oracle.sql_guard import RejectedSQL, ensure_single_select
+from vivia.oracle.sql_guard import ensure_single_select
+from vivia.tools.errors import guarded
 from vivia.tools.explore import queries
 from vivia.tools.explore import templates as sql_templates
 
 
+@guarded
 def compile_sql(
     sql: Annotated[
         str,
@@ -36,10 +38,7 @@ def compile_sql(
 
     Exemple : compile_sql("SELECT id FROM #SCH#.orders", {"SCH": "SDATRG"})
     """
-    try:
-        ensure_single_select(sql)
-    except RejectedSQL as err:
-        return f"Rejete : {err}"
+    ensure_single_select(sql)
 
     resolved = sql_templates.substitute(sql, templates)
     try:

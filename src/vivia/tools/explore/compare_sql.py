@@ -9,6 +9,7 @@ from pydantic import Field
 from vivia.oracle import client
 from vivia.oracle import format as fmt
 from vivia.oracle.sql_guard import RejectedSQL, ensure_single_select
+from vivia.tools.errors import guarded
 from vivia.tools.explore import queries
 from vivia.tools.explore import templates as sql_templates
 from vivia.tools.explore.operations import by_flux, fetch_operations
@@ -16,7 +17,7 @@ from vivia.tools.explore.operations import by_flux, fetch_operations
 _DEFAULT_MAX_SECONDS = client.CALL_TIMEOUT_MS / 1000
 
 
-class OperationNotFound(Exception):
+class OperationNotFound(LookupError):
     def __init__(self, flux: str, operation: int):
         super().__init__(
             f"operation introuvable : flux={flux}, operation_nr={operation}. "
@@ -24,7 +25,7 @@ class OperationNotFound(Exception):
         )
 
 
-class AmbiguousOperation(Exception):
+class AmbiguousOperation(LookupError):
     def __init__(self, flux: str, operation: int, chaines: list[str]):
         super().__init__(
             f"flux={flux}, operation_nr={operation} existe dans plusieurs chaines "
@@ -57,6 +58,7 @@ def _probe(sql: str, max_seconds: float) -> tuple[int, int, float]:
     return n or 0, checksum or 0, duree
 
 
+@guarded
 def compare_sql(
     flux: Annotated[
         str, Field(description="Nom du flux ELT (V_M_OPERATION) dont on compare le SQL d'origine.")
@@ -101,15 +103,8 @@ def compare_sql(
 
     Exemple : compare_sql("TIERS", 1, "SELECT * FROM SDATRG.TIERS WHERE ...")
     """
-    try:
-        ensure_single_select(sql_optimise)
-    except RejectedSQL as err:
-        return f"Rejete : {err}"
-
-    try:
-        sql_original = _lookup_operation(flux, operation, chaine)
-    except (OperationNotFound, AmbiguousOperation) as err:
-        return f"Erreur : {err}"
+    ensure_single_select(sql_optimise)
+    sql_original = _lookup_operation(flux, operation, chaine)
 
     try:
         ensure_single_select(sql_original)
