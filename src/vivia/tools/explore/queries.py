@@ -28,7 +28,11 @@ VIEW_COLUMNS = "SELECT owner, column_name FROM all_tab_columns WHERE table_name 
 OPERATION_COLUMNS = "chaine, flux, operation_nr, operation_description, table_cible"
 
 # {cols} : colonnes a ramener (dont sql_text ou un calcul dessus) ; {where} : filtre du tool.
-OPERATIONS = "SELECT {cols} FROM ({source}) WHERE {where} ORDER BY chaine, flux, operation_nr"
+# Seules les versions en cours de validite (M_OPERATION garde l'historique).
+OPERATIONS = (
+    "SELECT {cols} FROM ({source}) WHERE validity_end_date > SYSDATE AND {where} "
+    "ORDER BY chaine, flux, operation_nr"
+)
 
 TRAC_DATA_SOURCES = (
     "SELECT DISTINCT source_name FROM ({source}) WHERE target_name = :target ORDER BY source_name"

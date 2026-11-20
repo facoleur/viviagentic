@@ -14,7 +14,9 @@ def fetch_operations(
     """(chaine, flux, operation_nr, description, table_cible, `last_col`), filtres en AND."""
     sql = queries.OPERATIONS.format(
         cols=f"{queries.OPERATION_COLUMNS}, {last_col}",
-        source=framework.union(framework.OPERATIONS, f"{queries.OPERATION_COLUMNS}, sql_text"),
+        source=framework.union(
+            framework.OPERATIONS, f"{queries.OPERATION_COLUMNS}, sql_text, validity_end_date"
+        ),
         where=" AND ".join(where) or "1 = 1",
     )
     return client.fetch(sql, params, max_rows=max_rows, max_seconds=max_seconds)[1]

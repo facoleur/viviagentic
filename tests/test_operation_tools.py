@@ -23,7 +23,7 @@ TRAC = {
 
 REAL_COLUMNS = [
     "CHAINE", "FLUX", "OPERATION_NR", "OPERATION_DESCRIPTION", "TABLE_CIBLE", "SQL_TEXT",
-    "SOURCE_NAME", "TARGET_NAME",
+    "SOURCE_NAME", "TARGET_NAME", "VALIDITY_END_DATE",
 ]  # fmt: skip
 
 
@@ -56,6 +56,12 @@ class OperationToolsTests(unittest.TestCase):
         sql, params = self.calls[-1]
         self.assertIn("operation_nr = :nr AND chaine = :chaine", sql)
         self.assertEqual(params, {"flux": "P_TIERS", "nr": 1, "chaine": "SDE_LOAD"})
+
+    def test_only_versions_still_valid_are_read(self):
+        get_operation("P_TIERS")
+        sql = self.calls[-1][0]
+        self.assertIn("WHERE validity_end_date > SYSDATE AND flux = :flux", sql)
+        self.assertIn("sql_text, validity_end_date FROM SDEINT.V_M_OPERATION", sql)
 
     def test_search_in_sql_shows_numbered_matching_lines(self):
         result = search_operations("nvl(", chaines=["sde_load"])
