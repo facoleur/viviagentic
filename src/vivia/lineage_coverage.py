@@ -72,11 +72,11 @@ def init(columns: dict, trac: dict[str, set[str]]) -> None:
     _state.update(schema=ensure_schema(columns, dialect="oracle"), owners=owners, trac=trac)
 
 
-def target_of(cible: str) -> str:
+def target_of(cible: str | None) -> str:
     """SCHEMA.TABLE de la cible : tel quel si qualifie, sinon l'unique schema qui la porte
-    (de preference *TRG)."""
-    name = cible.strip().upper()
-    if "." in name:
+    (de preference *TRG). Vide si l'operation n'a pas de table cible."""
+    name = (cible or "").strip().upper()
+    if not name or "." in name:
         return name
     owners = _state["owners"].get(name, [])
     owners = [o for o in owners if o.endswith("TRG")] or owners
@@ -89,14 +89,26 @@ def trac_name(table: str) -> str:
     return re.sub(r"\$.*", "", bare.removeprefix("V_"))
 
 
+def op_id(op: tuple) -> str:
+    return f"{op[0]}.{op[1]}.{op[2]}"
+
+
 def analyze(job: tuple) -> dict:
     """Une operation -> une ligne de rapport. Ne leve jamais : tout echec devient un statut."""
-    (chaine, flux, nr, _, cible, sql), limit = job
-    sql = sql or ""
-    out = {"op": f"{chaine}.{flux}.{nr}", "cible": cible, "lignes": sql.count("\n") + 1}
+    try:
+        return _analyze(job)
+    except Exception as err:
+        message = f"{type(err).__name__}: {err}"[:200]
+        return {"op": op_id(job[0]), "cible": job[0][4], "statut": "erreur", "message": message}
+
+
+def _analyze(job: tuple) -> dict:
+    op, limit = job
+    cible, sql = op[4], op[5] or ""
+    out = {"op": op_id(op), "cible": cible, "lignes": sql.count("\n") + 1}
     if kind := next((k for k, rx in UNSUPPORTED.items() if rx.search(sql)), None):
         return out | {"statut": f"non_analysable:{kind}"}
-    target = target_of(cible)
+    target = target_of(cible) or None  # sans cible : seuls les INSERT/MERGE nomment leur table
     start = time.perf_counter()
     try:
         with time_limit(limit):
@@ -110,7 +122,9 @@ def analyze(job: tuple) -> dict:
     sources: dict[str, set[str]] = {}
     for e in edges:
         sources.setdefault(e["target"], set()).add(e["source"])
-    names = _state["schema"].column_names(exp.to_table(target, dialect="oracle"))
+    names = []
+    if target:
+        names = _state["schema"].column_names(exp.to_table(target, dialect="oracle"))
     wanted = [f"{target}.{c}" for c in names] or list(sources)
     star = [c for c in wanted if any(s.endswith(".*") for s in sources.get(c, ()))]
     none = [c for c in wanted if c not in sources]
@@ -118,10 +132,10 @@ def analyze(job: tuple) -> dict:
     unknown = sorted(
         t for t in tables if t.rsplit(".", 1)[-1] not in _state["owners"] and t.upper() not in NOISE
     )
-    declared = _state["trac"].get(trac_name(cible), set())
+    declared = _state["trac"].get(trac_name(cible), set()) if cible else set()
     used = {trac_name(t) for t in tables if not t.split(".")[0].endswith("STG")}
     return out | {
-        "statut": "ok" if edges else "vide",
+        "statut": "ok" if edges else ("vide" if target else "sans_cible"),
         "secondes": _since(start),
         "colonnes": len(wanted),
         "exactes": len(wanted) - len(star) - len(none),
@@ -206,21 +220,27 @@ def main() -> None:
     parser.add_argument("-n", type=int, help="nombre maximal d'operations")
     parser.add_argument("-j", type=int, default=4, help="processus en parallele")
     parser.add_argument("-t", "--timeout", type=int, default=60, help="secondes par operation")
+    parser.add_argument(
+        "--resume", action="store_true", help="saute les operations deja dans report.jsonl"
+    )
     args = parser.parse_args()
 
     ops, columns, trac = load([c.upper() for c in args.cibles], args.n)
     print(f"{len(ops)} operations, {sum(map(len, columns.values()))} tables au dictionnaire")
-    jobs = [(op, args.timeout) for op in ops]
-    rows = []
-    with ProcessPoolExecutor(args.j, initializer=init, initargs=(columns, trac)) as pool:
+    OUT.mkdir(parents=True, exist_ok=True)
+    report = OUT / "report.jsonl"
+    rows = [json.loads(x) for x in report.read_text().splitlines()] if args.resume else []
+    done = {r["op"] for r in rows}
+    jobs = [(op, args.timeout) for op in ops if op_id(op) not in done]
+    print(f"{len(jobs)} a analyser, {len(done)} deja faites", file=sys.stderr)
+    pool = ProcessPoolExecutor(args.j, initializer=init, initargs=(columns, trac))
+    with report.open("a" if args.resume else "w") as out, pool:
         for i, row in enumerate(pool.map(analyze, jobs, chunksize=1), 1):
             rows.append(row)
+            out.write(json.dumps(row, ensure_ascii=False) + "\n")
+            out.flush()  # rien n'est perdu si le script s'arrete : --resume reprend
             if i % 100 == 0:
                 print(f"  {i}/{len(jobs)}", file=sys.stderr)
-    OUT.mkdir(parents=True, exist_ok=True)
-    (OUT / "report.jsonl").write_text(
-        "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows)
-    )
     summary = summarize(rows)
     (OUT / "summary.txt").write_text(summary + "\n")
     print(summary)

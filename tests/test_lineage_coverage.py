@@ -1,7 +1,12 @@
 """Couverture du lignage colonne : analyse d'une operation et resume, sans base."""
 
+import json
 import signal
+import sys
+import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
 
 from tests.oracle_env import require_oracle
 from vivia import lineage_coverage as cov
@@ -47,6 +52,18 @@ class AnalyzeTests(unittest.TestCase):
         self.assertEqual(row["statut"], "erreur")
         self.assertTrue(row["message"])
 
+    def test_operation_without_target_table(self):
+        """TABLE_CIBLE vide : un INSERT garde sa table, un SELECT seul est signale."""
+        job = lambda sql: (("CH", "T", 1, None, None, sql), 60)  # noqa: E731
+        row = cov.analyze(job("INSERT INTO SDETRG.T (A) SELECT t.ID_TIERS FROM SDEINT.V_P_TIERS t"))
+        self.assertEqual((row["statut"], row["colonnes"], row["cible"]), ("ok", 1, None))
+        self.assertEqual(cov.analyze(job("SELECT 1 FROM DUAL"))["statut"], "sans_cible")
+
+    def test_analyze_never_raises(self):
+        with mock.patch.object(cov, "_analyze", side_effect=AttributeError("boom")):
+            row = cov.analyze(op("SELECT 1 FROM DUAL"))
+        self.assertEqual((row["statut"], row["message"]), ("erreur", "AttributeError: boom"))
+
     def test_bare_target_is_resolved_to_its_unique_trg_schema(self):
         self.assertEqual(cov.target_of("t"), "SDETRG.T")
         self.assertEqual(cov.target_of("SDETRG.T"), "SDETRG.T")
@@ -57,6 +74,60 @@ class AnalyzeTests(unittest.TestCase):
         with self.assertRaises(cov.Timeout), cov.time_limit(0.05):
             while True:
                 pass
+
+
+class Inline:
+    """ProcessPoolExecutor sans processus : meme interface, execute sur place."""
+
+    def __init__(self, workers, initializer, initargs):
+        initializer(*initargs)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def map(self, fn, items, chunksize=1):
+        return map(fn, items)
+
+
+class MainTests(unittest.TestCase):
+    def run_main(self, ops, *flags):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        patches = [
+            mock.patch.object(cov, "OUT", Path(folder.name)),
+            mock.patch.object(cov, "load", lambda cibles, limit: (ops, COLUMNS, TRAC)),
+            mock.patch.object(cov, "ProcessPoolExecutor", Inline),
+            mock.patch.object(sys, "argv", ["vivia-lineage-coverage", *flags]),
+        ]
+        for patch in patches:
+            patch.start()
+            self.addCleanup(patch.stop)
+        cov.main()
+        return Path(folder.name)
+
+    def test_rows_are_written_as_they_come_and_resume_skips_the_done_ones(self):
+        sql = "SELECT t.* FROM SDEINT.V_P_TIERS t"
+        ops = [("CH", "F1", 1, None, "T", sql), ("CH", "F2", 1, None, "T", sql)]
+        out = self.run_main(ops[:1])
+        self.assertEqual(len((out / "report.jsonl").read_text().splitlines()), 1)
+
+        with mock.patch.object(cov, "analyze", wraps=cov.analyze) as analyze:
+            self.run_main_again(out, ops)
+        self.assertEqual(analyze.call_count, 1)  # seule F2 est analysee
+        lines = (out / "report.jsonl").read_text().splitlines()
+        self.assertEqual([json.loads(x)["op"] for x in lines], ["CH.F1.1", "CH.F2.1"])
+
+    def run_main_again(self, out, ops):
+        with (
+            mock.patch.object(cov, "OUT", out),
+            mock.patch.object(cov, "load", lambda cibles, limit: (ops, COLUMNS, TRAC)),
+            mock.patch.object(cov, "ProcessPoolExecutor", Inline),
+            mock.patch.object(sys, "argv", ["vivia-lineage-coverage", "--resume"]),
+        ):
+            cov.main()
 
 
 class SummaryTests(unittest.TestCase):
