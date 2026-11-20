@@ -105,3 +105,21 @@ def test_insert_without_column_list_uses_the_dictionary_order():
         {"source": "S.V.ID", "target": "T.X.A"},
         {"source": "S.V.NOM", "target": "T.X.B"},
     ]
+
+
+def test_join_marks_are_stripped_outside_strings_and_comments():
+    from lineage import strip_join_marks
+
+    sql = "WHERE a.ID = b.ID(+) AND c.X ( + ) = 1 AND d = '(+)' -- (+) reste\n AND e = f.G(+)"
+    assert strip_join_marks(sql) == (
+        "WHERE a.ID = b.ID AND c.X  = 1 AND d = '(+)' -- (+) reste\n AND e = f.G"
+    )
+
+
+def test_join_mark_inside_a_select_expression_does_not_warn(caplog):
+    schema = {"S": {"A": {"ID": "N", "X": "V"}, "B": {"ID": "N", "Y": "V"}}}
+    sql = "INSERT INTO T (P,Q) SELECT a.X, NVL(b.Y(+), 'n') FROM S.A a, S.B b WHERE a.ID = b.ID(+)"
+    with caplog.at_level("WARNING", logger="sqlglot"):
+        edges = lineage(sql, columns=True, schema=schema)
+    assert {(e["source"], e["target"]) for e in edges} == {("S.A.X", "T.P"), ("S.B.Y", "T.Q")}
+    assert "(+)" not in caplog.text
