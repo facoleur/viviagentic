@@ -21,6 +21,12 @@ TRAC = {
 }
 
 
+REAL_COLUMNS = [
+    "CHAINE", "FLUX", "OPERATION_NR", "OPERATION_DESCRIPTION", "TABLE_CIBLE", "SQL_TEXT",
+    "SOURCE_NAME", "TARGET_NAME",
+]  # fmt: skip
+
+
 class OperationToolsTests(unittest.TestCase):
     def setUp(self):
         self.calls = []
@@ -29,13 +35,16 @@ class OperationToolsTests(unittest.TestCase):
             self.calls.append((sql, params))
             if sql == queries.VIEW_OWNERS:
                 return [], [("SDEINT",), ("DMDINT",)]
+            if sql == queries.VIEW_COLUMNS:
+                return [], [(o, c) for o in ("SDEINT", "DMDINT") for c in REAL_COLUMNS]
             if "target_name = :target" in sql:
                 return [], TRAC.get(params["target"], [])
             last = 3 if "REGEXP_COUNT" in sql else SQL
             return [], [(*OP, last)]
 
-        framework.schemas.cache_clear()
-        self.addCleanup(framework.schemas.cache_clear)  # ne pas laisser les schemas simules
+        for cached in (framework.schemas, framework.columns_of):
+            cached.cache_clear()
+            self.addCleanup(cached.cache_clear)  # ne pas laisser les schemas simules
         patcher = mock.patch.object(client, "fetch", fetch)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -222,3 +231,31 @@ class BindNamesTests(unittest.TestCase):
                     found |= {(name, b) for b in re.findall(r"(?<![:\w]):([A-Za-z_]\w*)", text)}
         bad = sorted(n for n, bind in found if bind.upper() in self.RESERVED)
         self.assertEqual(bad, [])
+
+
+class FrameworkColumnsTests(unittest.TestCase):
+    def setUp(self):
+        columns = {"SDEINT": ["CHAIN_NAME", "FLOW_NAME", "OPERATION_NR", "SQL_TEXT"]}
+        self.patches = [
+            mock.patch.object(framework, "schemas", lambda view: ("SDEINT",)),
+            mock.patch.object(framework, "columns_of", lambda view: columns),
+        ]
+        for patch in self.patches:
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def test_internal_names_are_mapped_to_the_real_columns(self):
+        with mock.patch.dict(
+            framework.COLUMNS, {"V_X": {"chaine": "CHAIN_NAME", "flux": "FLOW_NAME"}}
+        ):
+            sql = framework.union("V_X", "chaine, flux, operation_nr")
+        self.assertEqual(
+            sql, "SELECT CHAIN_NAME AS chaine, FLOW_NAME AS flux, operation_nr FROM SDEINT.V_X"
+        )
+
+    def test_a_missing_column_is_named_with_the_real_columns(self):
+        with self.assertRaises(LookupError) as ctx:
+            framework.union("V_X", "chaine, operation_nr")
+        message = str(ctx.exception)
+        self.assertIn("SDEINT.V_X : colonne(s) chaine absente(s)", message)
+        self.assertIn("Colonnes reelles : CHAIN_NAME, FLOW_NAME, OPERATION_NR, SQL_TEXT", message)

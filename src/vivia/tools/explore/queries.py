@@ -23,6 +23,8 @@ DISTINCT_VALUES = "SELECT DISTINCT {col} FROM {obj} ORDER BY {col} FETCH FIRST {
 # n'est unique que dans un flux.
 VIEW_OWNERS = "SELECT owner FROM all_views WHERE view_name = :name ORDER BY owner"
 
+VIEW_COLUMNS = "SELECT owner, column_name FROM all_tab_columns WHERE table_name = :name"
+
 OPERATION_COLUMNS = "chaine, flux, operation_nr, operation_description, table_cible"
 
 # {cols} : colonnes a ramener (dont sql_text ou un calcul dessus) ; {where} : filtre du tool.
