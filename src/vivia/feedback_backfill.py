@@ -26,7 +26,7 @@ def load_function():
 
 
 def feedbacks(api: OpenWebUI) -> list[dict]:
-    return api.call("GET", "/api/v1/evaluations/feedbacks/all")
+    return api.call("GET", "/api/v1/evaluations/feedbacks/all/export")
 
 
 def backfill(items: list[dict], project: str, endpoint: str, dry_run: bool = False) -> Counter:
