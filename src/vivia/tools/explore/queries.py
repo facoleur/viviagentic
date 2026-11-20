@@ -28,8 +28,10 @@ OPERATION_COLUMNS = "chaine, flux, operation_nr, operation_description, table_ci
 # {cols} : colonnes a ramener (dont sql_text ou un calcul dessus) ; {where} : filtre du tool.
 OPERATIONS = "SELECT {cols} FROM ({source}) WHERE {where} ORDER BY chaine, flux, operation_nr"
 
+# Une table peut etre alimentee par plusieurs flux, chacun avec ses sources.
 TRAC_DATA_SOURCES = (
-    "SELECT DISTINCT source_name FROM ({source}) WHERE target_name = :target ORDER BY source_name"
+    "SELECT DISTINCT flow_name, source_name FROM ({source}) WHERE target_name = :target "
+    "ORDER BY flow_name, source_name"
 )
 
 # Vue -> table(s) qu'elle lit : les flux lisent SDEINT.V_X, ecrit dans SDETRG.X.

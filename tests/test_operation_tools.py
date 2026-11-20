@@ -13,10 +13,10 @@ from vivia.tools.explore.search_operations import search_operations
 SQL = "SELECT ID_TIERS,\n  NVL(SEGMENT, 'X') SEGMENT\nFROM SDAINT.V_TIERS"
 OP = ("SDE_LOAD", "P_TIERS", 1, "Alimente P_TIERS", "SDETRG.P_TIERS")
 TRAC = {
-    "F_OPE": [("P_TIERS",), ("W_AGG",)],
-    "P_TIERS": [("TIERS",)],
-    "W_AGG": [("W_AGG",), ("P_TIERS",)],  # boucle sur elle-meme, source deja vue
-    "TIERS": [("RAW_TIERS",)],
+    "F_OPE": [("F_OPE", "P_TIERS"), ("F_OPE", "W_AGG")],
+    "P_TIERS": [("P_TIERS", "TIERS"), ("P_TIERS_REPRISE", "MOUVEMENT")],  # deux flux
+    "W_AGG": [("W_AGG", "W_AGG"), ("W_AGG", "P_TIERS")],  # boucle sur elle-meme, source deja vue
+    "TIERS": [("TIERS", "RAW_TIERS")],
 }
 
 
@@ -58,19 +58,24 @@ class OperationToolsTests(unittest.TestCase):
         self.assertIn("| SDE_LOAD | P_TIERS | 1 | Alimente P_TIERS | SDETRG.P_TIERS | 3 |", result)
         self.assertIn("chaine IN (:chaine_0, :chaine_1)", self.calls[-1][0])
 
-    def test_level_one_is_the_direct_sources_only(self):
+    def test_level_one_is_the_direct_sources_only_each_arrow_carries_its_flux(self):
         result = get_dependencies("f_ope")
-        self.assertIn("P_TIERS --> F_OPE", result)
-        self.assertIn("W_AGG --> F_OPE", result)
-        self.assertNotIn("TIERS --> P_TIERS", result)
+        self.assertIn("P_TIERS -->|F_OPE| F_OPE", result)
+        self.assertIn("W_AGG -->|F_OPE| F_OPE", result)
+        self.assertNotIn("TIERS -->|P_TIERS|", result)
+
+    def test_a_table_loaded_by_two_flux_shows_each_flux_with_its_own_sources(self):
+        result = get_dependencies("P_TIERS")
+        self.assertIn("TIERS -->|P_TIERS| P_TIERS", result)
+        self.assertIn("MOUVEMENT -->|P_TIERS_REPRISE| P_TIERS", result)
 
     def test_each_level_repeats_the_search_for_every_new_source(self):
         result = get_dependencies("F_OPE", niveaux=3)
-        self.assertIn("TIERS --> P_TIERS", result)
-        self.assertIn("RAW_TIERS --> TIERS", result)
-        self.assertNotIn("W_AGG --> W_AGG", result)
+        self.assertIn("TIERS -->|P_TIERS| P_TIERS", result)
+        self.assertIn("RAW_TIERS -->|TIERS| TIERS", result)
+        self.assertNotIn("W_AGG -->|W_AGG| W_AGG", result)
         targets = [p["target"] for s, p in self.calls if p and "target" in p]
-        self.assertEqual(targets, ["F_OPE", "P_TIERS", "W_AGG", "TIERS"])
+        self.assertEqual(targets, ["F_OPE", "P_TIERS", "W_AGG", "TIERS", "MOUVEMENT"])
 
     def test_framework_views_are_read_from_the_discovered_schemas(self):
         get_dependencies("F_OPE")

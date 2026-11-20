@@ -245,11 +245,13 @@ def _node(name: str) -> str:
     return re.sub(r"\W", "_", name)
 
 
-def dependencies_graph(root: str, edges: list[tuple[str, str]]) -> str:
-    """Graphe Mermaid source --> cible."""
+def dependencies_graph(root: str, edges: list[tuple[str, str, str]]) -> str:
+    """Graphe Mermaid source -->|flux| cible."""
     if not edges:
         return f"Aucune source dans V_M_TRAC_DATA pour {root}."
-    arrows = [f"  {_node(s)} --> {_node(t)}" for s, t in dict.fromkeys(edges) if s != t]
+    arrows = [
+        f"  {_node(s)} -->|{flow}| {_node(t)}" for s, t, flow in dict.fromkeys(edges) if s != t
+    ]
     return truncate("\n".join([f"## Sources de {root}", "```mermaid", "graph LR", *arrows, "```"]))
 
 
