@@ -171,7 +171,9 @@ a Phoenix. Le filtre derivant ses identifiants par hachage de (projet, utilisate
 le meme dans les valves des deux fonctions. Un vote donne avant que le tour soit exporte est
 renvoye toutes les 5 s (6 essais). `identifier` vaut l'id du feedback : changer son vote ou
 ajouter un commentaire met a jour l'annotation au lieu d'en empiler une. Phoenix est suppose
-toujours actif : il n'y a pas de rattrapage pour des votes donnes pendant un arret.
+toujours actif. Pour les votes donnes pendant un arret, ou avant l'installation de la fonction :
+`make backfill-feedback` (`--dry-run` pour compter) relit tous les feedbacks d'Open WebUI et les
+rejoue ; idempotent, et les votes sur des tours non traces sont comptes `sans_span`.
 
 ### Latence
 
