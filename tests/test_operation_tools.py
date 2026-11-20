@@ -1,5 +1,6 @@
 """Outils d'operations et lignage recursif, sans base : `client.fetch` est simule."""
 
+import re
 import unittest
 from unittest import mock
 
@@ -94,3 +95,130 @@ class OperationSizeTests(unittest.TestCase):
         cut = fmt.operations_sql("P_TIERS", [(*OP, "y" * 300_000)])
         self.assertTrue(cut.startswith("ATTENTION : SQL tronque"))
         self.assertLess(len(cut), fmt.MAX_SQL_CHARS + 200)
+
+
+class BindNamesTests(unittest.TestCase):
+    # Oracle refuse un mot reserve comme nom de bind : ORA-01745 (ex. `:view`, `:table`).
+    RESERVED = frozenset(
+        [
+            "ACCESS",
+            "ADD",
+            "ALL",
+            "ALTER",
+            "AND",
+            "ANY",
+            "AS",
+            "ASC",
+            "AUDIT",
+            "BETWEEN",
+            "BY",
+            "CHAR",
+            "CHECK",
+            "CLUSTER",
+            "COLUMN",
+            "COMMENT",
+            "COMPRESS",
+            "CONNECT",
+            "CREATE",
+            "CURRENT",
+            "DATE",
+            "DECIMAL",
+            "DEFAULT",
+            "DELETE",
+            "DESC",
+            "DISTINCT",
+            "DROP",
+            "ELSE",
+            "EXCLUSIVE",
+            "EXISTS",
+            "FILE",
+            "FLOAT",
+            "FOR",
+            "FROM",
+            "GRANT",
+            "GROUP",
+            "HAVING",
+            "IDENTIFIED",
+            "IMMEDIATE",
+            "IN",
+            "INCREMENT",
+            "INDEX",
+            "INITIAL",
+            "INSERT",
+            "INTEGER",
+            "INTERSECT",
+            "INTO",
+            "IS",
+            "LEVEL",
+            "LIKE",
+            "LOCK",
+            "LONG",
+            "MAXEXTENTS",
+            "MINUS",
+            "MODE",
+            "MODIFY",
+            "NOAUDIT",
+            "NOCOMPRESS",
+            "NOT",
+            "NOWAIT",
+            "NULL",
+            "NUMBER",
+            "OF",
+            "OFFLINE",
+            "ON",
+            "ONLINE",
+            "OPTION",
+            "OR",
+            "ORDER",
+            "PCTFREE",
+            "PRIOR",
+            "PUBLIC",
+            "RAW",
+            "RENAME",
+            "RESOURCE",
+            "REVOKE",
+            "ROW",
+            "ROWID",
+            "ROWNUM",
+            "ROWS",
+            "SELECT",
+            "SESSION",
+            "SET",
+            "SHARE",
+            "SIZE",
+            "SMALLINT",
+            "START",
+            "SUCCESSFUL",
+            "SYNONYM",
+            "SYSDATE",
+            "TABLE",
+            "THEN",
+            "TO",
+            "TRIGGER",
+            "UID",
+            "UNION",
+            "UNIQUE",
+            "UPDATE",
+            "USER",
+            "VALIDATE",
+            "VALUES",
+            "VARCHAR",
+            "VARCHAR2",
+            "VIEW",
+            "WHENEVER",
+            "WHERE",
+            "WITH",
+        ]
+    )
+
+    def test_no_query_binds_a_reserved_word(self):
+        from vivia.oracle import queries as oracle_queries
+        from vivia.retrodoc import sql as retrodoc_sql
+
+        found = set()
+        for module in (queries, oracle_queries, retrodoc_sql):
+            for name, text in vars(module).items():
+                if isinstance(text, str) and name.isupper():
+                    found |= {(name, b) for b in re.findall(r"(?<![:\w]):([A-Za-z_]\w*)", text)}
+        bad = sorted(n for n, bind in found if bind.upper() in self.RESERVED)
+        self.assertEqual(bad, [])

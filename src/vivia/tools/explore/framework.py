@@ -13,7 +13,7 @@ FLOWDATA = "V_M_FLOWDATA"
 @cache
 def schemas(view: str) -> tuple[str, ...]:
     """Schemas qui exposent `view` (ex. SDEINT, DMDINT), lus une fois dans ALL_VIEWS."""
-    _, rows = client.fetch(queries.VIEW_OWNERS, {"view": view})
+    _, rows = client.fetch(queries.VIEW_OWNERS, {"name": view})
     if not rows:
         raise LookupError(f"vue {view} introuvable dans ALL_VIEWS (nom ou droits a verifier)")
     return tuple(owner for (owner,) in rows)

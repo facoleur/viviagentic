@@ -21,7 +21,7 @@ DISTINCT_VALUES = "SELECT DISTINCT {col} FROM {obj} ORDER BY {col} FETCH FIRST {
 
 # Vues du framework ETL ({source} : `framework.union`, schemas decouverts). OPERATION_NR
 # n'est unique que dans un flux.
-VIEW_OWNERS = "SELECT owner FROM all_views WHERE view_name = :view ORDER BY owner"
+VIEW_OWNERS = "SELECT owner FROM all_views WHERE view_name = :name ORDER BY owner"
 
 OPERATION_COLUMNS = "chaine, flux, operation_nr, operation_description, table_cible"
 
