@@ -15,6 +15,10 @@ def test_template_is_not_confused_with_oracle_syntax():
     ensure_single_select("SELECT * FROM #SCH#.orders WHERE dt = TO_DATE('#PNDATE#', 'YYYYMMDD')")
 
 
+def test_templated_table_name_is_accepted():
+    ensure_single_select("SELECT a.x FROM #SCHEMA.TABLE# a JOIN #SCH#.#T# b ON a.id = b.id")
+
+
 def test_ddl_is_rejected():
     with pytest.raises(RejectedSQL):
         ensure_single_select("DROP TABLE dual")

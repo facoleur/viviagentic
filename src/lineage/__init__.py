@@ -16,6 +16,7 @@ from sqlglot.optimizer.qualify import qualify
 from sqlglot.schema import ensure_schema
 
 _TPL = re.compile(r"#(\w+)#")
+_TPL_TABLE = re.compile(r"#(\w+(?:\.\w+)+)#")  # #SCHEMA.TABLE# : une table templatifiee
 _MASK = re.compile(r"TPL#(\w+)#")
 _WRITES = exp.Insert | exp.Merge | exp.Update | exp.Create
 # Chaines, commentaires (a laisser tels quels) ou marqueur de jointure externe `(+)`.
@@ -24,8 +25,9 @@ _JOIN_MARK = re.compile(r"'(?:[^']|'')*'|--[^\n]*|/\*.*?\*/|\(\s*\+\s*\)", re.S)
 
 def mask_templates(sql: str) -> str:
     """Remplace `#NOM#` par `TPL#NOM#`, un identifiant Oracle valide, pour que sqlglot le
-    traite comme un nom plutot que de bloquer sur `#` en premiere position."""
-    return _TPL.sub(r"TPL#\1#", sql)
+    traite comme un nom plutot que de bloquer sur `#` en premiere position. Un nom de table
+    templatifie `#SCHEMA.TABLE#` devient simplement `SCHEMA.TABLE`."""
+    return _TPL.sub(r"TPL#\1#", _TPL_TABLE.sub(r"\1", sql))
 
 
 def strip_join_marks(sql: str) -> str:

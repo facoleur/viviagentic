@@ -63,7 +63,9 @@ class AnalyzeTests(unittest.TestCase):
         self.assertEqual(cov.analyze(job("SELECT 1 FROM DUAL"))["statut"], "sans_cible")
 
     def test_parse_error_reports_the_failing_sql_and_a_groupable_message(self):
-        row = cov.analyze(op("INSERT INTO T (A) SELECT t.ID_TIERS FROM #SCHEMA.TABLE# t"))
+        row = cov.analyze(
+            op("INSERT INTO T (A) SELECT t.ID_TIERS FROM #SCHEMA.TABLE t")
+        )  # `#` non refermé
         self.assertEqual(row["statut"], "erreur")
         self.assertIn("<HASH>", row["message"])  # pas de ligne/colonne dans le message
         self.assertNotIn("line:", row["message"])

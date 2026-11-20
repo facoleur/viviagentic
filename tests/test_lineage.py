@@ -123,3 +123,14 @@ def test_join_mark_inside_a_select_expression_does_not_warn(caplog):
         edges = lineage(sql, columns=True, schema=schema)
     assert {(e["source"], e["target"]) for e in edges} == {("S.A.X", "T.P"), ("S.B.Y", "T.Q")}
     assert "(+)" not in caplog.text
+
+
+def test_templated_table_name_is_the_table():
+    schema = {"S": {"V_A": {"ID": "N", "X": "V", "D": "D"}}}
+    sql = (
+        "INSERT INTO #S.T# (P) SELECT a.X FROM #S.V_A# a "
+        "WHERE a.D <= TO_DATE('#PNDATE#','YYYYMMDD')"
+    )
+    edges = lineage(sql, columns=True, schema=schema)
+    assert edges == [{"source": "S.V_A.X", "target": "S.T.P"}]
+    assert lineage(sql) == [{"source": "S.V_A", "target": "S.T"}]
