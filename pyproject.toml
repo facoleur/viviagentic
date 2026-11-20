@@ -5,6 +5,8 @@ description = "Local LLM stack: Ollama + Open WebUI + FastMCP + Phoenix"
 requires-python = ">=3.12"
 dependencies = [
     "fastmcp>=4.1",
+    "httpx>=0.28.1",
+    "jinja2>=3.1.6",
     "oracledb>=3.0",
     "pydantic>=2.14",
     "sqlfluff>=4.5.0",
@@ -16,6 +18,8 @@ dependencies = [
 vivia-mcp = "vivia.mcp:main"
 vivia-configure = "vivia.configure:main"
 vivia-lineage = "lineage:main"
+vivia-lineage-coverage = "vivia.lineage_coverage:main"
+vivia-retrodoc = "vivia.retrodoc.cli:main"
 
 [dependency-groups]
 ops = ["httpx>=0.28"]

@@ -46,6 +46,17 @@ TOOL_SERVER_CONNECTIONS = [
   { url = "http://mcp:8000/mcp", type = "mcp", auth_type = "none", key = "", path = "", info = { id = "vivia", name = "vivia", description = "Tools de test (now, calc, roll_dice, text_stats)" }, config = { enable = true } },
 ]
 
+# ---------------------------------------------------------------------------
+# Connexions OpenAI-compatibles, ajoutees a cote de celles deja configurees (OpenRouter).
+# Reperees par leur URL : relancer `make configure` met a jour la cle et la config.
+# La cle vient de la variable d'environnement `api_key_env` (.env), jamais d'ici.
+# prefix_id : les modeles de la connexion apparaissent en "<prefix_id>.<id distant>".
+# ---------------------------------------------------------------------------
+[[connections]]
+url = "https://llm.example.com/v1"  # A RENSEIGNER
+api_key_env = "LLM_GATEWAY_API_KEY"
+config = { enable = true, prefix_id = "gw", connection_type = "external", auth_type = "bearer", model_ids = [], tags = [] }
+
 # Aucune generation auxiliaire : le modele ne recoit que la question posee.
 # Pas de titre de conversation, pas de tags, pas de questions de suivi,
 # pas d'autocompletion, pas de reformulation de requete RAG/recherche.
@@ -89,6 +100,7 @@ meta = { description = "Qwen3 8B + tools MCP vivia", toolIds = [
   "server:mcp:vivia",
 ], skillIds = [
   "oracle-elt",
+  "oracle-elt-ecriture",
   "oracle-elt-erreurs",
   "oracle-elt-syntaxe-26ai",
   "oracle-elt-patterns",
@@ -108,6 +120,7 @@ meta = { description = "Qwen3.8 27B (OpenRouter) + tools MCP vivia", toolIds = [
   "server:mcp:vivia",
 ], skillIds = [
   "oracle-elt",
+  "oracle-elt-ecriture",
   "oracle-elt-erreurs",
   "oracle-elt-syntaxe-26ai",
   "oracle-elt-patterns",
@@ -116,6 +129,46 @@ meta = { description = "Qwen3.8 27B (OpenRouter) + tools MCP vivia", toolIds = [
   "oracle-elt-dictionnaire",
 ] }
 params = { function_calling = "native" }
+
+# Modele derive d'un modele de la connexion ci-dessus : son propre id et son nom, le serveur
+# MCP vivia, les skills, et une partie des outils integres d'Open WebUI coupes
+# (meta.builtinTools : une categorie absente reste active ; `skills` doit le rester pour
+# que le modele puisse charger un skill avec view_skill).
+# public = true : visible de tous les comptes (sinon seul l'admin le voit).
+[[models]]
+id = "vivia-dwh"
+base_model_id = "gw.qwen3.6-35b"  # A RENSEIGNER : "<prefix_id>.<id du modele distant>"
+name = "Vivia DWH"
+is_active = true
+public = true
+params = { function_calling = "native" }
+
+[models.meta]
+description = "Assistant DWH Oracle : tools MCP vivia + skills oracle-elt"
+toolIds = ["server:mcp:vivia"]
+skillIds = [
+  "oracle-elt",
+  "oracle-elt-ecriture",
+  "oracle-elt-erreurs",
+  "oracle-elt-syntaxe-26ai",
+  "oracle-elt-patterns",
+  "oracle-elt-performance",
+  "oracle-elt-plsql",
+  "oracle-elt-dictionnaire",
+]
+
+[models.meta.builtinTools]
+web_search = false
+image_generation = false
+code_interpreter = false
+memory = false
+notes = false
+chats = false
+channels = false
+calendar = false
+automations = false
+tasks = false
+notifications = false
 
 [[functions]]
 id = "phoenix_tracing"

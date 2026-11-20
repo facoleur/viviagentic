@@ -21,7 +21,7 @@ rejouable a volonte, et ne demande jamais de passer par l'UI.
 
 Chaque table `[api."<chemin>"]` est POSTee telle quelle sur `/api/v1/<chemin>` : ajouter ou
 retirer un reglage ne demande aucune modification de code, et n'importe quel endpoint de
-configuration est atteignable. Seules `[[groups]]`, `[[skills]]`, `[[models]]` et `[[functions]]`
+configuration est atteignable. Seules `[[groups]]`, `[[connections]]`, `[[skills]]`, `[[models]]` et `[[functions]]`
 ont un schema fixe, chacune traitee par un module de `src/vivia/configure/`.
 Les noms de cles sont documentes dans
 <https://docs.openwebui.com/getting-started/env-configuration/>.
@@ -33,6 +33,20 @@ dans `[[models]]` (ici `qwen3:8b`) restent proposes : tout autre modele liste pa
 dans Ollama est desactive au `make configure` suivant. Le modele d'arene est coupe par
 `[api."evaluations/config"]`. Desactiver `nomic-embed-text` ici ne touche pas aux embeddings
 RAG, qui l'appellent directement.
+
+### Connexions et modeles derives
+
+`[[connections]]` ajoute une connexion OpenAI-compatible (reperee par son URL, les autres
+connexions restent intactes). Sa cle n'est jamais dans le `.toml` : `api_key_env` nomme la
+variable de `.env` qui la contient (`make configure` charge `.env`). Avec `prefix_id = "gw"`,
+ses modeles apparaissent en `gw.<id distant>`.
+
+Un `[[models]]` avec `base_model_id` cree un modele derive : son propre id et nom, ses tools
+(`toolIds`, dont le serveur MCP `server:mcp:vivia`), ses skills, et des outils integres
+d'Open WebUI coupes via `meta.builtinTools` (`web_search = false`, ...; une categorie absente
+reste active, garder `skills` pour `view_skill`). `public = true` le rend visible de tous les
+comptes. Le modele de base, non declare, est masque par `only_declared_models` sans gener le
+modele derive, qui route directement vers la connexion.
 
 ### Skills
 
@@ -172,7 +186,7 @@ plutot qu'estime.
 
 `src/vivia/mcp/explore.py` expose 8 outils de lecture du DWH Oracle (compte lecture seule) :
 `compile_sql`, `describe_table`, `search_objects`, `run_select`, `check_grain`, `column_stats`,
-`find_usages`, `get_source`. La connexion (`src/vivia/oracle/client.py`, `python-oracledb` en
+`find_usages`, `get_source`, et d'autres. La connexion (`src/vivia/oracle/client.py`, `python-oracledb` en
 mode thin, pas de client Oracle a installer) lit `ORACLE_DSN`, `ORACLE_USER`, `ORACLE_PASSWORD`
 (obligatoires), `ORACLE_CALL_TIMEOUT_MS` et `ORACLE_MAX_ROWS` (optionnels) dans l'environnement.
 
@@ -183,6 +197,18 @@ d'AWR/ASH/Diagnostics Pack. `compile_sql` et `run_select` valident le SQL libre 
 privileges optionnels (`DBMS_STATS.CONVERT_RAW_VALUE` pour `column_stats`, visibilite
 d'`ALL_DEPENDENCIES`/`ALL_SOURCE` pour `find_usages`/`get_source`) se degradent proprement,
 sans jamais faire planter l'outil.
+
+Vues du framework (`V_M_OPERATION`, `V_M_TRAC_DATA`, `V_M_FLOWDATA`) : leurs schemas sont
+lues dans `SDEINT` et `DMDINT` seulement (`SCHEMAS` de `tools/explore/framework.py`, verifies
+dans `ALL_VIEWS`). Si une
+colonne porte un autre nom en prod, l'erreur liste les colonnes reelles ; le dictionnaire
+`COLUMNS` du meme fichier fait la correspondance (`chaine` -> `CHAIN_NAME`, ...).
+`get_operation` (SQL d'un flux ou d'une operation, 200 000 caracteres au plus),
+`search_operations` (nom de flux, description et SQL, avec les lignes trouvees),
+`list_operations` (operations d'une ou plusieurs chaines). `get_dependencies("P_FLUX")` :
+`SELECT source_name ... WHERE target_name = 'P_FLUX'`, puis la meme recherche pour chaque
+source trouvee, 3 niveaux au plus ; graphe Mermaid. Noms exacts des tables,
+sans schema.
 
 ```sh
 docker compose -f docker/oracle-test/docker-compose.yml up -d   # Oracle Free, schemas zone+type
@@ -228,6 +254,42 @@ directement utilisable par le tool `graph`, et `to_mermaid(edges, columns)` le b
   table. Les aretes restent dans le resultat, lisibles par le modele.
 - **Markdown** : `--md` ecrit un bloc ` ```mermaid ` (flowchart gauche-droite, une boite par table en
   mode colonne), rendu nativement par Open WebUI, GitHub ou VS Code, sans rien charger du web.
+
+## Retro-doc
+
+Un JSON par table SDA/SDE strategique, dans `artifacts/retrodoc/doc/`. Le code collecte les faits
+(dictionnaire, profil sur echantillon, flux via `V_TRAC_DATA`, SQL des flux producteurs,
+frequence via `V_M_FLOWDATA`) ; le LLM ne redige que la prose (description, grain, regles de
+calcul, origine des colonnes).
+
+```bash
+uv run vivia-retrodoc select -n 200       # selection.json : tables lues par le plus de flux
+uv run vivia-retrodoc run -j 2            # documente la selection (ou : run SDETRG.P_TIERS)
+```
+
+- Noms des vues du framework : `src/vivia/retrodoc/sql.py`. Prompts : `prompts/*.j2`.
+- LLM : `RETRODOC_LLM_URL` (defaut Ollama `http://localhost:11434/v1`), `RETRODOC_MODEL`. Avec
+  Ollama, fixer `OLLAMA_CONTEXT_LENGTH` (ex. 131072) et `OLLAMA_NUM_PARALLEL` >= `-j`.
+- `glossaire.json` (`{"ACRONYME": "definition"}`) : seuls les termes presents dans la table et son
+  SQL sont donnes au LLM.
+- Corrections humaines : `overrides/SCHEMA.TABLE.json`, fusionne par-dessus le resultat.
+- Le LLM n'est rappele que si le SQL, le schema, les sources ou le glossaire changent.
+
+### Couverture du lignage colonne
+
+`uv run vivia-lineage-coverage` (lecture seule) analyse **toutes** les operations de
+`V_M_OPERATION` avec le dictionnaire `ALL_TAB_COLUMNS` (qui developpe les `*` et nomme les
+colonnes d'un `INSERT` sans liste), puis resume : operations analysees, en erreur, en timeout ou
+non analysables (PL/SQL, `INSERT ALL`, `WITH FUNCTION`) ; part des colonnes cibles avec une
+source, derriere un `*` non developpe, ou sans source (constante, `COUNT(*)` ou echec) ; temps
+par operation ; tables lues absentes du dictionnaire ; sources lues absentes de `V_M_TRAC_DATA`.
+Une ligne JSON par operation dans `artifacts/lineage_coverage/report.jsonl`, ecrite au fil de
+l'eau : `--resume` reprend apres un arret : il saute les operations reussies et refait celles en erreur
+(utile apres une correction du parseur). Une operation
+sans table cible est analysee si c'est un `INSERT`/`MERGE`, sinon marquee `sans_cible`. Options : tables
+cibles en arguments, `-n` (nombre d'operations), `-j` (processus), `-t` (secondes par operation,
+Unix). Le resume donne un extrait du SQL pour chaque erreur d'analyse frequente, et separe les colonnes
+techniques `DL_` (souvent des constantes) des colonnes metier. Sert a decider si le lignage colonne est assez fiable avant de construire le graphe.
 
 ## Tests
 

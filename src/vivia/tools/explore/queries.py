@@ -19,18 +19,40 @@ COMPILE_SQL_PROBE = "SELECT * FROM (\n{sql}\n) WHERE 1 = 0 FETCH FIRST 0 ROWS ON
 
 DISTINCT_VALUES = "SELECT DISTINCT {col} FROM {obj} ORDER BY {col} FETCH FIRST {limit} ROWS ONLY"
 
-# Une ligne par (table cible, table source) declaree par le framework ETL, par zone (TRAC_DATA
-# existe une fois par schema *TRG, comme M_OPERATION) ; {schema} = "SDATRG", "SDETRG", etc.
-TRAC_DATA_BY_ZONE = (
-    "SELECT chaine, flux, table_source FROM {schema}.TRAC_DATA WHERE table_cible = :cible"
+# Vues du framework ETL ({source} : `framework.union`, schemas decouverts). OPERATION_NR
+# n'est unique que dans un flux.
+VIEW_OWNERS = "SELECT owner FROM all_views WHERE view_name = :name ORDER BY owner"
+
+VIEW_COLUMNS = "SELECT owner, column_name FROM all_tab_columns WHERE table_name = :name"
+
+OPERATION_COLUMNS = "chaine, flux, operation_nr, operation_description, table_cible"
+
+# {cols} : colonnes a ramener (dont sql_text ou un calcul dessus) ; {where} : filtre du tool.
+# Seules les versions en cours de validite (M_OPERATION garde l'historique).
+OPERATIONS = (
+    "SELECT {cols} FROM ({source}) WHERE validity_end_date > SYSDATE AND {where} "
+    "ORDER BY chaine, flux, operation_nr"
 )
-TRAC_DATA_DEPENDENCIES = "SELECT * FROM ({unioned}) ORDER BY chaine, flux"
 
-FIND_OPERATION_SCHEMAS = "SELECT DISTINCT owner FROM all_tables WHERE table_name = 'M_OPERATION'"
+TRAC_DATA_SOURCES = (
+    "SELECT DISTINCT source_name FROM ({source}) WHERE target_name = :target ORDER BY source_name"
+)
 
-FIND_OPERATION_IN_SCHEMA = (
-    "SELECT '{schema}' owner, sql_text FROM {schema}.M_OPERATION "
-    "WHERE flux = :flux AND id_operation = :operation"
+# Dictionnaire des schemas zone + type, colonnes dans l'ordre de la table (COLUMN_ID).
+DICTIONARY_COLUMNS = (
+    "SELECT owner, table_name, column_name, data_type FROM all_tab_columns "
+    "WHERE REGEXP_LIKE(owner, '^(SDA|SDE|DMD)(STG|TRG|INT)$') "
+    "ORDER BY owner, table_name, column_id"
+)
+
+# Toutes les sources declarees, par cible ({source} : `framework.union`).
+TRAC_DATA_ALL = "SELECT DISTINCT target_name, source_name FROM ({source})"
+
+# Vue -> table(s) qu'elle lit : les flux lisent SDEINT.V_X, ecrit dans SDETRG.X.
+VIEW_TABLES = (
+    "SELECT owner || '.' || name, referenced_owner || '.' || referenced_name "
+    "FROM all_dependencies WHERE type = 'VIEW' AND referenced_type = 'TABLE' "
+    "AND owner LIKE '%INT'"
 )
 
 DESCRIBE_TABLE_COLUMNS = """

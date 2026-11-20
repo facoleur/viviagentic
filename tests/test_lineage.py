@@ -96,3 +96,41 @@ def test_select_only_script_with_target():
         {"source": "#SCH#.SRC.ID", "target": "#SCH#.DST.ID"},
         {"source": "#SCH#.SRC.MT", "target": "#SCH#.DST.MT"},
     ]
+
+
+def test_insert_without_column_list_uses_the_dictionary_order():
+    schema = {"S": {"V": {"ID": "N", "NOM": "V"}}, "T": {"X": {"A": "N", "B": "V"}}}
+    edges = lineage("INSERT INTO T.X SELECT v.ID, v.NOM FROM S.V v", columns=True, schema=schema)
+    assert edges == [
+        {"source": "S.V.ID", "target": "T.X.A"},
+        {"source": "S.V.NOM", "target": "T.X.B"},
+    ]
+
+
+def test_join_marks_are_stripped_outside_strings_and_comments():
+    from lineage import strip_join_marks
+
+    sql = "WHERE a.ID = b.ID(+) AND c.X ( + ) = 1 AND d = '(+)' -- (+) reste\n AND e = f.G(+)"
+    assert strip_join_marks(sql) == (
+        "WHERE a.ID = b.ID AND c.X  = 1 AND d = '(+)' -- (+) reste\n AND e = f.G"
+    )
+
+
+def test_join_mark_inside_a_select_expression_does_not_warn(caplog):
+    schema = {"S": {"A": {"ID": "N", "X": "V"}, "B": {"ID": "N", "Y": "V"}}}
+    sql = "INSERT INTO T (P,Q) SELECT a.X, NVL(b.Y(+), 'n') FROM S.A a, S.B b WHERE a.ID = b.ID(+)"
+    with caplog.at_level("WARNING", logger="sqlglot"):
+        edges = lineage(sql, columns=True, schema=schema)
+    assert {(e["source"], e["target"]) for e in edges} == {("S.A.X", "T.P"), ("S.B.Y", "T.Q")}
+    assert "(+)" not in caplog.text
+
+
+def test_templated_table_name_is_the_table():
+    schema = {"S": {"V_A": {"ID": "N", "X": "V", "D": "D"}}}
+    sql = (
+        "INSERT INTO #S.T# (P) SELECT a.X FROM #S.V_A# a "
+        "WHERE a.D <= TO_DATE('#PNDATE#','YYYYMMDD')"
+    )
+    edges = lineage(sql, columns=True, schema=schema)
+    assert edges == [{"source": "S.V_A.X", "target": "S.T.P"}]
+    assert lineage(sql) == [{"source": "S.V_A", "target": "S.T"}]

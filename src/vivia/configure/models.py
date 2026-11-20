@@ -3,6 +3,7 @@
 from urllib.parse import quote
 
 from vivia.configure.client import OpenWebUI, deep_merge
+from vivia.configure.skills import PUBLIC_READ
 
 
 def upsert_model(api: OpenWebUI, model: dict, default: dict | None = None) -> None:
@@ -16,11 +17,15 @@ def upsert_model(api: OpenWebUI, model: dict, default: dict | None = None) -> No
 def sync_models(api: OpenWebUI, models: list[dict], only_declared: bool = False) -> None:
     """Entrees de modele : porte les toolIds et les params de function calling.
 
+    `base_model_id` cree un modele derive (nom, tools, skills a soi) ; `public = true` le
+    rend visible de tous les comptes, sinon seul l'admin le voit.
+
     `only_declared` desactive tout autre modele (Ollama, connexions, modeles du workspace) :
     une entree `is_active=false` de meme id le retire de la liste, pour tous les comptes.
     """
     for model in models:
-        upsert_model(api, model)
+        grants = {"access_grants": PUBLIC_READ} if model.get("public") else {}
+        upsert_model(api, {k: v for k, v in model.items() if k != "public"} | grants)
         meta = model.get("meta") or {}
         tools = ", ".join(meta.get("toolIds") or []) or "aucun"
         skills = ", ".join(meta.get("skillIds") or []) or "aucun"

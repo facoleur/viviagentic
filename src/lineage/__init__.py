@@ -13,16 +13,27 @@ import sqlglot
 from sqlglot import exp
 from sqlglot.lineage import lineage as _column_lineage
 from sqlglot.optimizer.qualify import qualify
+from sqlglot.schema import ensure_schema
 
 _TPL = re.compile(r"#(\w+)#")
+_TPL_TABLE = re.compile(r"#(\w+(?:\.\w+)+)#")  # #SCHEMA.TABLE# : une table templatifiee
 _MASK = re.compile(r"TPL#(\w+)#")
 _WRITES = exp.Insert | exp.Merge | exp.Update | exp.Create
+# Chaines, commentaires (a laisser tels quels) ou marqueur de jointure externe `(+)`.
+_JOIN_MARK = re.compile(r"'(?:[^']|'')*'|--[^\n]*|/\*.*?\*/|\(\s*\+\s*\)", re.S)
 
 
 def mask_templates(sql: str) -> str:
     """Remplace `#NOM#` par `TPL#NOM#`, un identifiant Oracle valide, pour que sqlglot le
-    traite comme un nom plutot que de bloquer sur `#` en premiere position."""
-    return _TPL.sub(r"TPL#\1#", sql)
+    traite comme un nom plutot que de bloquer sur `#` en premiere position. Un nom de table
+    templatifie `#SCHEMA.TABLE#` devient simplement `SCHEMA.TABLE`."""
+    return _TPL.sub(r"TPL#\1#", _TPL_TABLE.sub(r"\1", sql))
+
+
+def strip_join_marks(sql: str) -> str:
+    """Retire les `(+)` de jointure externe : ils ne changent pas quelle colonne alimente laquelle,
+    et sqlglot les signale ou les refuse hors d'un simple `WHERE a = b(+)`."""
+    return _JOIN_MARK.sub(lambda m: m[0] if m[0][0] in "'-/" else "", sql)
 
 
 def _unmask(name: str) -> str:
@@ -61,13 +72,15 @@ def lineage(
 ) -> list[dict[str, str]]:
     """Aretes source -> cible, au format du tool MCP `graph`.
 
-    `columns=True` donne des noeuds `TABLE.COLONNE`. `schema` (format sqlglot, noms masques)
-    permet de developper les `SELECT *` ; sans lui, ils restent des colonnes `*`.
+    `columns=True` donne des noeuds `TABLE.COLONNE`. `schema` (dict sqlglot ou `MappingSchema`
+    deja construit, noms masques) permet de developper les `SELECT *` et de nommer les colonnes
+    d'un `INSERT` sans liste de colonnes ; sans lui, les `*` restent des colonnes `*`.
     `target` : table alimentee par les `SELECT` seuls, quand c'est l'outil ETL qui les ecrit
     (lus comme `CREATE TABLE <target> AS SELECT ...`) ; sans lui, ils sont ignores.
     """
     edges = {}
-    for stmt in sqlglot.parse(mask_templates(sql), read="oracle"):
+    schema = ensure_schema(schema, dialect="oracle")  # construit une seule fois
+    for stmt in sqlglot.parse(strip_join_marks(mask_templates(sql)), read="oracle"):
         if target and isinstance(stmt, exp.Query):
             table = exp.to_table(mask_templates(target), dialect="oracle")
             stmt = exp.Create(this=table, kind="TABLE", expression=stmt)
@@ -85,14 +98,15 @@ def lineage(
             if not c.table and _MASK.fullmatch(c.name):
                 c.replace(exp.Literal.string(_unmask(c.name)))
         opts = {"validate_qualify_columns": False, "identify": False}
-        query = qualify(query, schema=schema or {}, dialect="oracle", **opts)
-        cols = cols or query.named_selects
+        query = qualify(query, schema=schema, dialect="oracle", **opts)
+        # Sans liste de colonnes, Oracle range le i-eme SELECT dans la i-eme colonne de la table.
+        cols = cols or schema.column_names(stmt.this.find(exp.Table)) or query.named_selects
         keys = []  # alias positionnels (doublons, expressions sans nom), sauf `*` non resolu
         for i, sel in enumerate(query.selects):
             keys.append("*" if isinstance(sel, exp.Star) else f"C{i}")
             if keys[-1] != "*":
                 sel.replace(exp.alias_(sel.unalias(), keys[-1]))
-        nodes = _column_lineage(None, query, schema or {}, dialect="oracle")
+        nodes = _column_lineage(None, query, schema, dialect="oracle")
         for key, col in zip(keys, cols, strict=False):
             dst = f"{out}.{_unmask(col)}"
             for leaf in nodes[key].walk():

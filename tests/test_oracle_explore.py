@@ -9,9 +9,12 @@ from vivia.tools.explore.compare_sql import compare_sql
 from vivia.tools.explore.compile_sql import compile_sql
 from vivia.tools.explore.describe_table import describe_table
 from vivia.tools.explore.find_usages import find_usages
+from vivia.tools.explore.get_operation import get_operation
 from vivia.tools.explore.get_source import get_source
+from vivia.tools.explore.list_operations import list_operations
 from vivia.tools.explore.run_select import run_select
 from vivia.tools.explore.search_objects import search_objects
+from vivia.tools.explore.search_operations import search_operations
 
 
 class OracleExploreTests(unittest.TestCase):
@@ -100,24 +103,27 @@ class OracleExploreTests(unittest.TestCase):
         self.assertIn("Erreur", result)
 
     def test_compare_sql_reports_identical_when_logic_is_unchanged(self):
-        # Operation 1 du flux TIERS (SDATRG.M_OPERATION, init.sql) : meme SQL mot pour mot.
+        # Operation 1 du flux P_TIERS (SDEINT.V_M_OPERATION, init.sql) : meme resultat.
         result = compare_sql(
-            "TIERS",
+            "P_TIERS",
             1,
-            "SELECT * FROM SDATRG.TIERS WHERE DATE_CREATION <= TO_DATE('#PNDATE#','YYYYMMDD')",
+            "SELECT ID_TIERS, NOM, PRENOM, SEGMENT, PAYS, "
+            "TO_DATE('#PNDATE#','YYYYMMDD') DT_DEB, DATE '9999-12-31' DT_FIN FROM SDAINT.V_TIERS",
         )
         self.assertIn("IDENTIQUE", result)
 
     def test_compare_sql_reports_different_when_logic_changes(self):
-        result = compare_sql("TIERS", 1, "SELECT * FROM SDATRG.TIERS WHERE SEGMENT = 'PRO'")
+        result = compare_sql(
+            "P_TIERS", 1, "SELECT ID_TIERS FROM SDAINT.V_TIERS WHERE SEGMENT = 'PRO'"
+        )
         self.assertIn("DIFFERENT", result)
 
     def test_compare_sql_reports_the_ora_error_on_the_new_sql(self):
-        result = compare_sql("TIERS", 1, "SELECT nope_column FROM SDATRG.TIERS")
+        result = compare_sql("P_TIERS", 1, "SELECT nope_column FROM SDAINT.V_TIERS")
         self.assertIn("ORA-00904", result)
 
     def test_compare_sql_rejects_dml(self):
-        result = compare_sql("TIERS", 1, "DELETE FROM SDATRG.TIERS")
+        result = compare_sql("P_TIERS", 1, "DELETE FROM SDATRG.TIERS")
         self.assertIn("Rejete", result)
 
     def test_compare_sql_unknown_operation_gives_an_actionable_error(self):
@@ -131,8 +137,21 @@ class OracleExploreTests(unittest.TestCase):
             "(SELECT LEVEL c FROM DUAL CONNECT BY LEVEL <= 6000) a, "
             "(SELECT LEVEL c FROM DUAL CONNECT BY LEVEL <= 6000) b"
         )
-        result = compare_sql("TIERS", 1, slow, max_seconds=1)
+        result = compare_sql("P_TIERS", 1, slow, max_seconds=1)
         self.assertIn("Depassement", result)
+
+    def test_get_operation_reads_the_int_view(self):
+        result = get_operation("P_TIERS")
+        self.assertIn("SDE_LOAD.P_TIERS op 1 -> `SDETRG.P_TIERS`", result)
+        self.assertIn("FROM SDAINT.V_TIERS", result)
+
+    def test_search_operations_finds_a_table_read_in_the_sql(self):
+        result = search_operations("SDAINT.V_MOUVEMENT")
+        self.assertIn("P_FLUX", result)
+
+    def test_list_operations_of_a_chain(self):
+        result = list_operations(["SDE_LOAD"])
+        self.assertIn("| SDE_LOAD | P_FLUX | 2 |", result)
 
 
 if __name__ == "__main__":

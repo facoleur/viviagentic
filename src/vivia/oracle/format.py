@@ -3,6 +3,8 @@
 Seul module a produire du texte affiche : les tools n'assemblent pas de Markdown eux-memes.
 """
 
+import re
+
 import oracledb
 
 from vivia.oracle import glossary
@@ -238,9 +240,71 @@ def distinct_values_report(col: str, rows: list[tuple], limit: int) -> str:
 # --- get_dependencies ----------------------------------------------------------------------------
 
 
-def dependencies_report(table_cible: str, rows: list[tuple]) -> str:
+def _node(name: str) -> str:
+    """Identifiant Mermaid : lettres, chiffres et _ seulement."""
+    return re.sub(r"\W", "_", name)
+
+
+def dependencies_graph(root: str, edges: list[tuple[str, str]]) -> str:
+    """Graphe Mermaid source --> cible."""
+    if not edges:
+        return f"Aucune source dans V_M_TRAC_DATA pour {root}."
+    arrows = [f"  {_node(s)} --> {_node(t)}" for s, t in dict.fromkeys(edges) if s != t]
+    return truncate("\n".join([f"## Sources de {root}", "```mermaid", "graph LR", *arrows, "```"]))
+
+
+# --- operations --------------------------------------------------------------------------------
+
+
+def _operation_title(chaine, flux, nr, description, cible) -> str:
+    return f"{chaine}.{flux} op {nr} -> `{cible}`" + (f" — {description}" if description else "")
+
+
+MAX_SQL_CHARS = 200_000
+
+
+def operations_sql(flux: str, rows: list[tuple]) -> str:
+    """SQL complet jusqu'a MAX_SQL_CHARS ; au-dela, refus (flux) ou troncature (operation seule)."""
     if not rows:
-        return f"Aucune dependance declaree dans TRAC_DATA pour {table_cible}."
-    lines = [f"## Sources necessaires a {table_cible}"]
-    lines += [f"- `{source}` (chaine {chaine}, flux {flux})" for chaine, flux, source in rows]
-    return "\n".join(lines)
+        return f"Aucune operation pour le flux {flux}. Utiliser search_operations."
+    text = "\n\n".join(
+        f"### {_operation_title(*row[:5])}\n```sql\n{row[5] or ''}\n```" for row in rows
+    )
+    if len(text) <= MAX_SQL_CHARS:
+        return text
+    if len(rows) > 1:
+        sizes = [f"- op {nr} : {len(sql or ''):,} caracteres" for _, _, nr, *_, sql in rows]
+        return "\n".join(
+            [
+                f"SQL du flux {flux} trop long ({len(text):,} caracteres > {MAX_SQL_CHARS:,}) : "
+                "rappeler get_operation avec `operation_nr` pour une operation a la fois.",
+                *sizes,
+            ]
+        )
+    return (
+        f"ATTENTION : SQL tronque a {MAX_SQL_CHARS:,} caracteres sur {len(text):,}. "
+        "La fin de l'operation manque.\n\n" + text[:MAX_SQL_CHARS]
+    )
+
+
+def search_operations_report(texte: str, rows: list[tuple], limit: int) -> str:
+    if not rows:
+        return f"Aucune operation ne contient « {texte} »."
+    lines = [f"## Operations contenant « {texte} »"]
+    for *head, sql in rows:
+        lines.append(f"- {_operation_title(*head)}")
+        lines_sql = enumerate((sql or "").splitlines(), 1)
+        hits = [(i, ln) for i, ln in lines_sql if texte.upper() in ln.upper()]
+        lines += [f"  - l.{i} : `{ln.strip()[:160]}`" for i, ln in hits[:3]]
+        if len(hits) > 3:
+            lines.append(f"  - ... {len(hits) - 3} autres lignes")
+    if len(rows) == limit:
+        lines.append(f"\n(limite de {limit} atteinte : affiner `texte` ou `chaines`)")
+    return truncate("\n".join(lines))
+
+
+def list_operations_report(chaines: list[str], rows: list[tuple], limit: int) -> str:
+    if not rows:
+        return f"Aucune operation pour les chaines {', '.join(chaines)}."
+    columns = ["chaine", "flux", "op", "description", "table cible", "lignes SQL"]
+    return markdown_table(columns, rows, limit)

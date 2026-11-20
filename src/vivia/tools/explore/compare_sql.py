@@ -1,4 +1,4 @@
-"""Compare le SQL d'une operation ELT (M_OPERATION) a une version optimisee : diff et duree."""
+"""Compare le SQL d'une operation ELT (V_M_OPERATION) a une version optimisee : diff et duree."""
 
 import time
 from typing import Annotated
@@ -11,37 +11,35 @@ from vivia.oracle import format as fmt
 from vivia.oracle.sql_guard import RejectedSQL, ensure_single_select
 from vivia.tools.explore import queries
 from vivia.tools.explore import templates as sql_templates
+from vivia.tools.explore.operations import by_flux, fetch_operations
 
 _DEFAULT_MAX_SECONDS = client.CALL_TIMEOUT_MS / 1000
 
 
 class OperationNotFound(Exception):
     def __init__(self, flux: str, operation: int):
-        super().__init__(f"operation introuvable : flux={flux}, id_operation={operation}")
-
-
-class AmbiguousOperation(Exception):
-    def __init__(self, flux: str, operation: int, schemas: list[str]):
         super().__init__(
-            f"flux={flux}, id_operation={operation} existe dans plusieurs schemas "
-            f"({', '.join(schemas)}) : M_OPERATION n'est pas encore indexe par chaine/appli."
+            f"operation introuvable : flux={flux}, operation_nr={operation}. "
+            "Utiliser search_operations pour la retrouver."
         )
 
 
-def _lookup_operation(flux: str, operation: int) -> str:
-    """Cherche (flux, operation) dans M_OPERATION, quel que soit le schema qui le porte."""
-    _, owners = client.fetch(queries.FIND_OPERATION_SCHEMAS)
-    schemas = sorted(owner for (owner,) in owners)
-    if not schemas:
-        raise OperationNotFound(flux, operation)
+class AmbiguousOperation(Exception):
+    def __init__(self, flux: str, operation: int, chaines: list[str]):
+        super().__init__(
+            f"flux={flux}, operation_nr={operation} existe dans plusieurs chaines "
+            f"({', '.join(chaines)}) : preciser `chaine`."
+        )
 
-    union = " UNION ALL ".join(queries.FIND_OPERATION_IN_SCHEMA.format(schema=s) for s in schemas)
-    _, rows = client.fetch(union, {"flux": flux.upper(), "operation": operation})
+
+def _lookup_operation(flux: str, operation: int, chaine: str | None) -> str:
+    """SQL de l'operation `operation` du flux, dans V_M_OPERATION (operation_nr unique par flux)."""
+    rows = fetch_operations(*by_flux(flux, operation, chaine))
     if not rows:
         raise OperationNotFound(flux, operation)
     if len(rows) > 1:
-        raise AmbiguousOperation(flux, operation, [owner for owner, _ in rows])
-    return rows[0][1]
+        raise AmbiguousOperation(flux, operation, [r[0] for r in rows])
+    return rows[0][-1]
 
 
 def _is_timeout(err: oracledb.DatabaseError) -> bool:
@@ -61,10 +59,10 @@ def _probe(sql: str, max_seconds: float) -> tuple[int, int, float]:
 
 def compare_sql(
     flux: Annotated[
-        str, Field(description="Nom du flux ELT (M_OPERATION) dont on compare le SQL d'origine.")
+        str, Field(description="Nom du flux ELT (V_M_OPERATION) dont on compare le SQL d'origine.")
     ],
     operation: Annotated[
-        int, Field(description="Identifiant de l'operation (id_operation) dans le flux.")
+        int, Field(description="Numero de l'operation (operation_nr) dans le flux.")
     ],
     sql_optimise: Annotated[
         str,
@@ -85,10 +83,14 @@ def compare_sql(
             gt=0,
         ),
     ] = _DEFAULT_MAX_SECONDS,
+    chaine: Annotated[
+        str | None,
+        Field(description="Chaine du flux, si le meme flux existe dans plusieurs chaines."),
+    ] = None,
 ) -> str:
-    """Compare le SQL d'une operation ELT (M_OPERATION) a une version optimisee.
+    """Compare le SQL d'une operation ELT (V_M_OPERATION) a une version optimisee.
 
-    Retrouve le SQL d'origine via `flux` + `operation` (= id_operation), substitue les templates
+    Retrouve le SQL d'origine via `flux` + `operation` (= operation_nr), substitue les templates
     `#NOM#` sur les deux versions (comme `compile_sql`), puis execute chacune en entier (compte +
     somme de controle, sans rapatrier les lignes) pour comparer resultat et duree.
 
@@ -105,7 +107,7 @@ def compare_sql(
         return f"Rejete : {err}"
 
     try:
-        sql_original = _lookup_operation(flux, operation)
+        sql_original = _lookup_operation(flux, operation, chaine)
     except (OperationNotFound, AmbiguousOperation) as err:
         return f"Erreur : {err}"
 

@@ -1,8 +1,10 @@
 """`make configure` sans appel reseau : modeles declares, skills."""
 
+import os
 import re
 import tomllib
 import unittest
+from unittest import mock
 
 from vivia import configure
 
@@ -91,3 +93,49 @@ class SkillsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ConnectionsTests(unittest.TestCase):
+    def test_connection_is_appended_then_updated_with_the_key_from_the_environment(self):
+        class Api:
+            def __init__(self, current):
+                self.current, self.posts = current, []
+
+            def get(self, path):
+                return self.current
+
+            def try_call(self, method, path, body):
+                self.posts.append((path, body))
+
+        conn = {"url": "https://gw/v1/", "api_key_env": "GW_KEY", "config": {"prefix_id": "gw"}}
+        api = Api({"OPENAI_API_BASE_URLS": ["https://or/v1"], "OPENAI_API_KEYS": ["k0"],
+                   "OPENAI_API_CONFIGS": {"0": {"enable": True}}})  # fmt: skip
+        with mock.patch.dict(os.environ, {"GW_KEY": "secret"}):
+            configure.sync_connections(api, [conn])
+            path, body = api.posts[0]
+            self.assertEqual(path, "/openai/config/update")
+            self.assertEqual(body["OPENAI_API_BASE_URLS"], ["https://or/v1", "https://gw/v1"])
+            self.assertEqual(body["OPENAI_API_KEYS"], ["k0", "secret"])
+            self.assertEqual(body["OPENAI_API_CONFIGS"]["1"], {"prefix_id": "gw"})
+
+            api.current = body  # relance : meme URL, pas de doublon
+            configure.sync_connections(api, [conn])
+            self.assertEqual(api.posts[1][1]["OPENAI_API_BASE_URLS"], body["OPENAI_API_BASE_URLS"])
+
+    def test_missing_key_stops_the_run(self):
+        conn = {"url": "https://gw/v1", "api_key_env": "ABSENT_KEY"}
+        with mock.patch.dict(os.environ, {}, clear=True), self.assertRaises(SystemExit):
+            configure.sync_connections(mock.Mock(get=lambda path: {}), [conn])
+
+
+class DerivedModelTests(unittest.TestCase):
+    def test_public_model_gets_read_grants_and_keeps_its_base(self):
+        model = {"id": "vivia-dwh", "base_model_id": "gw.m", "name": "Vivia DWH", "public": True,
+                 "meta": {"builtinTools": {"web_search": False}}, "params": {}}  # fmt: skip
+        api = FakeOpenWebUI([], {})
+        configure.sync_models(api, [model])
+        path, body = api.posts[0]
+        self.assertEqual(path, "/api/v1/models/create")
+        self.assertEqual(body["base_model_id"], "gw.m")
+        self.assertEqual(body["access_grants"], configure.skills.PUBLIC_READ)
+        self.assertNotIn("public", body)
