@@ -13,7 +13,10 @@ from vivia import lineage_coverage as cov
 
 COLUMNS = {
     "SDEINT": {"V_P_TIERS": {"ID_TIERS": "NUMBER", "NOM": "VARCHAR2", "CD_SEG": "VARCHAR2"}},
-    "SDETRG": {"T": {"A": "NUMBER", "B": "VARCHAR2", "C": "VARCHAR2"}},
+    "SDETRG": {
+        "T": {"A": "NUMBER", "B": "VARCHAR2", "C": "VARCHAR2"},
+        "T_DL": {"ID": "NUMBER", "DL_DATE": "DATE"},
+    },
 }
 TRAC = {"T": {"P_TIERS"}}
 
@@ -58,6 +61,27 @@ class AnalyzeTests(unittest.TestCase):
         row = cov.analyze(job("INSERT INTO SDETRG.T (A) SELECT t.ID_TIERS FROM SDEINT.V_P_TIERS t"))
         self.assertEqual((row["statut"], row["colonnes"], row["cible"]), ("ok", 1, None))
         self.assertEqual(cov.analyze(job("SELECT 1 FROM DUAL"))["statut"], "sans_cible")
+
+    def test_parse_error_reports_the_failing_sql_and_a_groupable_message(self):
+        row = cov.analyze(op("INSERT INTO T (A) SELECT t.ID_TIERS FROM #SCHEMA.TABLE# t"))
+        self.assertEqual(row["statut"], "erreur")
+        self.assertIn("<HASH>", row["message"])  # pas de ligne/colonne dans le message
+        self.assertNotIn("line:", row["message"])
+        self.assertIn("«", row["contexte"])
+        self.assertIn("#", row["contexte"])
+
+    def test_insert_naming_its_table_without_schema_still_matches_the_dictionary(self):
+        # TABLE_CIBLE resolue en SDETRG.T_DL, mais l'INSERT ecrit `INSERT INTO T_DL`.
+        row = cov.analyze(
+            op("INSERT INTO T_DL (ID) SELECT t.ID_TIERS FROM SDEINT.V_P_TIERS t", "T_DL")
+        )
+        self.assertEqual((row["colonnes"], row["exactes"], row["sans_source"]), (2, 1, 1))
+
+    def test_dl_columns_are_counted_apart(self):
+        sql = "INSERT INTO T_DL (ID, DL_DATE) SELECT t.ID_TIERS, SYSDATE FROM SDEINT.V_P_TIERS t"
+        row = cov.analyze(op(sql, cible="T_DL"))
+        self.assertEqual((row["colonnes"], row["exactes"], row["sans_source"]), (2, 1, 1))
+        self.assertEqual((row["dl"], row["dl_avec_source"]), (1, 0))
 
     def test_analyze_never_raises(self):
         with mock.patch.object(cov, "_analyze", side_effect=AttributeError("boom")):
@@ -144,6 +168,7 @@ class SummaryTests(unittest.TestCase):
         self.assertIn("avec source", text)
         self.assertIn("75%", text)  # 3 colonnes sur 4
         self.assertIn("ParseError: boom", text)
+        self.assertIn("hors DL_ : 3/4 avec source (75%)", text)
         self.assertIn("SDESTG.TMP", text)
         self.assertIn("C.F.1 : X", text)
 

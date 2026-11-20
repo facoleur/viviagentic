@@ -287,7 +287,8 @@ Une ligne JSON par operation dans `artifacts/lineage_coverage/report.jsonl`, ecr
 l'eau : `--resume` reprend apres un arret en sautant les operations deja faites. Une operation
 sans table cible est analysee si c'est un `INSERT`/`MERGE`, sinon marquee `sans_cible`. Options : tables
 cibles en arguments, `-n` (nombre d'operations), `-j` (processus), `-t` (secondes par operation,
-Unix). Sert a decider si le lignage colonne est assez fiable avant de construire le graphe.
+Unix). Le resume donne un extrait du SQL pour chaque erreur d'analyse frequente, et separe les colonnes
+techniques `DL_` (souvent des constantes) des colonnes metier. Sert a decider si le lignage colonne est assez fiable avant de construire le graphe.
 
 ## Tests
 

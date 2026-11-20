@@ -89,6 +89,24 @@ def trac_name(table: str) -> str:
     return re.sub(r"\$.*", "", bare.removeprefix("V_"))
 
 
+def short_error(err: Exception) -> str:
+    """Nom et description de l'erreur, sans coordonnees ni repr de token : regroupable."""
+    errors = getattr(err, "errors", None)
+    text = errors[0]["description"] if errors else str(err)
+    text = re.sub(r"<Token token_type: TokenType\.(\w+).*?>", r"<\1>", text)
+    return f"{type(err).__name__}: {' '.join(text.split())}"[:160]
+
+
+def error_context(err: Exception) -> str | None:
+    """SQL autour de l'erreur d'analyse, sur une ligne, l'endroit fautif entre « »."""
+    errors = getattr(err, "errors", None)
+    if not errors:
+        return None
+    e = errors[0]
+    text = f"{e['start_context'][-70:]}«{e['highlight']}»{e['end_context'][:40]}"
+    return " ".join(text.split())
+
+
 def op_id(op: tuple) -> str:
     return f"{op[0]}.{op[1]}.{op[2]}"
 
@@ -98,8 +116,8 @@ def analyze(job: tuple) -> dict:
     try:
         return _analyze(job)
     except Exception as err:
-        message = f"{type(err).__name__}: {err}"[:200]
-        return {"op": op_id(job[0]), "cible": job[0][4], "statut": "erreur", "message": message}
+        return {"op": op_id(job[0]), "cible": job[0][4], "statut": "erreur",
+                "message": short_error(err)}  # fmt: skip
 
 
 def _analyze(job: tuple) -> dict:
@@ -116,18 +134,25 @@ def _analyze(job: tuple) -> dict:
     except Timeout:
         return out | {"statut": "timeout", "secondes": limit}
     except Exception as err:
-        message = f"{type(err).__name__}: {err}"[:200]
-        return out | {"statut": "erreur", "message": message, "secondes": _since(start)}
+        return out | {
+            "statut": "erreur",
+            "message": short_error(err),
+            "contexte": error_context(err),
+            "secondes": _since(start),
+        }
 
+    # Par nom de colonne : l'INSERT peut nommer sa table sans schema alors que la cible est
+    # resolue avec (INSERT INTO T vs SDETRG.T), les noms de table ne se comparent donc pas.
     sources: dict[str, set[str]] = {}
     for e in edges:
-        sources.setdefault(e["target"], set()).add(e["source"])
+        sources.setdefault(e["target"].rsplit(".", 1)[-1], set()).add(e["source"])
     names = []
     if target:
         names = _state["schema"].column_names(exp.to_table(target, dialect="oracle"))
-    wanted = [f"{target}.{c}" for c in names] or list(sources)
+    wanted = names or list(sources)
     star = [c for c in wanted if any(s.endswith(".*") for s in sources.get(c, ()))]
     none = [c for c in wanted if c not in sources]
+    dl = [c for c in wanted if c.startswith("DL_")]
     tables = {s.rsplit(".", 1)[0] for srcs in sources.values() for s in srcs}
     unknown = sorted(
         t for t in tables if t.rsplit(".", 1)[-1] not in _state["owners"] and t.upper() not in NOISE
@@ -141,6 +166,8 @@ def _analyze(job: tuple) -> dict:
         "exactes": len(wanted) - len(star) - len(none),
         "etoile": len(star),
         "sans_source": len(none),
+        "dl": len(dl),  # colonnes techniques de chargement (DL_), souvent des constantes
+        "dl_avec_source": len([c for c in dl if c not in none and c not in star]),
         "inconnues": unknown,
         "hors_trac": sorted(used - declared - NOISE) if declared else None,
     }
@@ -164,6 +191,10 @@ def summarize(rows: list[dict]) -> str:
                        ("sans_source", "sans source (constante ou echec)")):  # fmt: skip
         part = sum(r[key] for r in ok)
         lines.append(f"  {label:36} {part:7}  {part / total:4.0%}")
+    dl = sum(r.get("dl", 0) for r in ok)
+    metier, metier_ok = total - dl, sum(r["exactes"] - r.get("dl_avec_source", 0) for r in ok)
+    lines.append(f"  dont colonnes DL_ (chargement) : {dl} ; hors DL_ : {metier_ok}/{metier} "
+                 f"avec source ({metier_ok / max(metier, 1):.0%})")  # fmt: skip
     full = sum(1 for r in ok if r["colonnes"] and r["exactes"] == r["colonnes"])
     lines.append(f"  operations dont toutes les colonnes ont une source : {full}/{len(ok)}")
 
@@ -175,10 +206,14 @@ def summarize(rows: list[dict]) -> str:
     slow = sorted((r for r in rows if "secondes" in r), key=lambda r: -r["secondes"])[:5]
     lines += [f"  {r['secondes']:>7} s  {r['lignes']:>5} lignes  {r['op']}" for r in slow]
 
-    errors = Counter(r["message"][:90] for r in rows if r["statut"] == "erreur")
-    lines += ["", "Erreurs les plus frequentes :"] + [
-        f"  {v:4} x {k}" for k, v in errors.most_common(8)
-    ]
+    failed = [r for r in rows if r["statut"] == "erreur"]
+    errors = Counter(r["message"] for r in failed)
+    example = {r["message"]: r.get("contexte") for r in failed if r.get("contexte")}
+    lines += ["", "Erreurs les plus frequentes (avec un extrait du SQL) :"]
+    for message, count in errors.most_common(8):
+        lines.append(f"  {count:4} x {message}")
+        if message in example:
+            lines.append(f"         ex. {example[message]}")
     unknown = Counter(t for r in ok for t in r["inconnues"])
     lines += ["", "Tables lues absentes du dictionnaire :"]
     lines += [f"  {v:4} x {k}" for k, v in unknown.most_common(10)]
