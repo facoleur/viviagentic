@@ -50,6 +50,7 @@ class SemanticLayerOracleTests(unittest.TestCase):
         # F_OPERATION a deux sources dans TRAC_DATA (voir docker/oracle-test/init.sql).
         result = get_dependencies("F_OPERATION")
         self.assertIn("P_FLUX --> F_OPERATION", result)
+        self.assertNotIn("P_ANCIEN", result)  # source dont la validite est terminee (init.sql)
         self.assertIn("P_TIERS --> F_OPERATION", result)
         self.assertIn("MOUVEMENT --> P_FLUX", get_dependencies("F_OPERATION", niveaux=2))
 

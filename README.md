@@ -267,7 +267,7 @@ directement utilisable par le tool `graph`, et `to_mermaid(edges, columns)` le b
 ## Retro-doc
 
 Un JSON par table SDA/SDE strategique, dans `artifacts/retrodoc/doc/`. Le code collecte les faits
-(dictionnaire, profil sur echantillon, flux via `V_TRAC_DATA`, SQL des flux producteurs,
+(dictionnaire, profil sur echantillon, flux via `V_M_TRAC_DATA`, SQL des flux producteurs,
 frequence via `V_M_FLOWDATA`) ; le LLM ne redige que la prose (description, grain, regles de
 calcul, origine des colonnes).
 

@@ -147,6 +147,11 @@ class OracleExploreTests(unittest.TestCase):
         # Une vue : le profil porte sur sa table (SAMPLE refuse, ou accepte, selon la vue).
         self.assertIn("Profil sur", describe_table("SDEINT.V_P_TIERS"))
 
+    def test_expired_operation_versions_and_sda_operations_are_not_read(self):
+        # init.sql : P_TIERS a une version perimee (fin de validite en 2020) ; SDA sans framework.
+        self.assertNotIn("Version perimee", get_operation("P_TIERS"))
+        self.assertIn("Aucune operation", list_operations("SDA_LOAD"))
+
     def test_get_operation_reads_the_int_view(self):
         result = get_operation("P_TIERS")
         self.assertIn("SDE_LOAD.P_TIERS op 1 -> `P_TIERS`", result)
