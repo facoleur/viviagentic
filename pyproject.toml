@@ -20,6 +20,7 @@ vivia-configure = "vivia.configure:main"
 vivia-lineage = "lineage:main"
 vivia-lineage-coverage = "vivia.lineage_coverage:main"
 vivia-retrodoc = "vivia.retrodoc.cli:main"
+vivia-feedback-backfill = "vivia.feedback_backfill:main"
 
 [dependency-groups]
 ops = ["httpx>=0.28"]
